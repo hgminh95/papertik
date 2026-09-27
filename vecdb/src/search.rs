@@ -215,6 +215,90 @@ pub fn search_batch(index: &Index, queries: &[Query]) -> Vec<Vec<Hit>> {
         .collect()
 }
 
+/// Approximate search with the IVF lists: score the query against the cluster centres, scan
+/// only the `nprobe` closest clusters. Queries in a batch that probe the same cluster share the
+/// scan of it. `nprobe == 0` (or an index without clusters) falls back to the exact scan.
+pub fn search_batch_ivf(index: &Index, queries: &[Query], nprobe: usize) -> Vec<Vec<Hit>> {
+    let nlist = index.nlist;
+    if nlist == 0 || nprobe == 0 || nprobe >= nlist {
+        return search_batch(index, queries);
+    }
+    let dim = index.dim;
+    let centroids = index.centroids();
+    let lists = index.lists();
+    let scales = index.scales();
+    let vecs = index.vecs();
+
+    // 1. Pick the clusters for each query (exact f32 dots against nlist centres).
+    let probes: Vec<Vec<u32>> = queries
+        .par_iter()
+        .map(|q| {
+            let mut scored: Vec<(f32, u32)> = centroids
+                .chunks_exact(dim)
+                .enumerate()
+                .map(|(j, c)| (c.iter().zip(q.q).map(|(a, b)| a * b).sum::<f32>(), j as u32))
+                .collect();
+            scored.select_nth_unstable_by(nprobe - 1, |a, b| b.0.total_cmp(&a.0));
+            scored[..nprobe].iter().map(|x| x.1).collect()
+        })
+        .collect();
+    // 2. Invert to cluster -> queries probing it.
+    let mut by_list: Vec<Vec<u16>> = vec![Vec::new(); nlist];
+    for (qi, ps) in probes.iter().enumerate() {
+        for &j in ps {
+            by_list[j as usize].push(qi as u16);
+        }
+    }
+    let quantized: Vec<(Vec<i8>, f32)> = queries.iter().map(|q| quantize(q.q)).collect();
+    let touched: Vec<usize> = (0..nlist).filter(|&j| !by_list[j].is_empty()).collect();
+
+    // 3. Scan each touched cluster once for all its queries, in parallel over clusters.
+    let partial: Vec<Vec<(u16, BinaryHeap<Hit>)>> = touched
+        .par_iter()
+        .map(|&j| {
+            let qs = &by_list[j];
+            let mut heaps: Vec<BinaryHeap<Hit>> = qs.iter().map(|&qi| BinaryHeap::with_capacity(queries[qi as usize].k + 1)).collect();
+            let mut thresholds = vec![f32::NEG_INFINITY; qs.len()];
+            let (lo, hi) = (lists[j] as usize, lists[j + 1] as usize);
+            for row in lo..hi {
+                let v = &vecs[row * dim..(row + 1) * dim];
+                for (h, &qi) in qs.iter().enumerate() {
+                    let query = &queries[qi as usize];
+                    let (q8, qs8) = &quantized[qi as usize];
+                    let score = qs8 * scales[row] * dot_i8_i8(q8, v) as f32;
+                    if score <= thresholds[h] || query.exclude.contains(&(row as u32)) {
+                        continue;
+                    }
+                    push(&mut heaps[h], query.k, Hit { row: row as u32, score });
+                    if heaps[h].len() == query.k {
+                        thresholds[h] = heaps[h].peek().unwrap().score;
+                    }
+                }
+            }
+            qs.iter().copied().zip(heaps).collect()
+        })
+        .collect();
+
+    // 4. Merge per query.
+    let mut merged: Vec<BinaryHeap<Hit>> = queries.iter().map(|q| BinaryHeap::with_capacity(q.k + 1)).collect();
+    for part in partial {
+        for (qi, heap) in part {
+            let k = queries[qi as usize].k;
+            for h in heap {
+                push(&mut merged[qi as usize], k, h);
+            }
+        }
+    }
+    merged
+        .into_iter()
+        .map(|h| {
+            let mut hits = h.into_vec();
+            hits.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.row.cmp(&b.row)));
+            hits
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,7 +317,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vecdb-test-{}", std::process::id()));
         crate::synth::generate(3000, 32, 5, &dir, 1).unwrap();
         let out = dir.join("index.bin");
-        crate::index::build(&dir.join("papers.jsonl"), &dir.join("embeddings.f32"), 32, &out).unwrap();
+        crate::index::build(&dir.join("papers.jsonl"), &dir.join("embeddings.f32"), 32, Some(0), &out).unwrap();
         let index = Index::open(&out).unwrap();
         let mut rng = crate::synth::Rng::new(3);
         let qs: Vec<Vec<f32>> = (0..5).map(|_| (0..32).map(|_| rng.gauss()).collect()).collect();
@@ -289,6 +373,38 @@ mod tests {
             assert_eq!(dot_i8_i8_portable(&a, &b), naive);
             assert_eq!(dot_i8_i8(&a, &b), naive);
         }
+    }
+
+    #[test]
+    fn ivf_finds_most_neighbours() {
+        let dir = std::env::temp_dir().join(format!("vecdb-ivf-{}", std::process::id()));
+        crate::synth::generate(20_000, 64, 10, &dir, 2).unwrap();
+        let out = dir.join("index.bin");
+        crate::index::build(&dir.join("papers.jsonl"), &dir.join("embeddings.f32"), 64, Some(64), &out).unwrap();
+        let index = Index::open(&out).unwrap();
+        assert_eq!(index.nlist, 64);
+        let lists = index.lists();
+        assert_eq!((lists[0], lists[64]), (0, 20_000));
+        let none = HashSet::new();
+        let mut rng = crate::synth::Rng::new(9);
+        let (mut found, mut total) = (0, 0);
+        for _ in 0..20 {
+            let r = (rng.next_u64() % 20_000) as usize;
+            let q: Vec<f32> = index.vecs()[r * 64..(r + 1) * 64].iter().map(|&x| x as f32).collect();
+            let query = Query { q: &q, k: 20, exclude: &none };
+            let exact = search_batch(&index, std::slice::from_ref(&query)).pop().unwrap();
+            let approx = search_batch_ivf(&index, std::slice::from_ref(&query), 16).pop().unwrap();
+            // The query's own row must come first, and all probes agree when nprobe = nlist.
+            assert_eq!(approx[0].row as usize, r);
+            let set: HashSet<u32> = exact.iter().map(|h| h.row).collect();
+            found += approx.iter().filter(|h| set.contains(&h.row)).count();
+            total += exact.len();
+            let all = search_batch_ivf(&index, std::slice::from_ref(&query), 64).pop().unwrap();
+            assert_eq!(all.iter().map(|h| h.row).collect::<Vec<_>>(), exact.iter().map(|h| h.row).collect::<Vec<_>>());
+        }
+        let recall = found as f64 / total as f64;
+        assert!(recall > 0.8, "recall {recall}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

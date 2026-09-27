@@ -51,13 +51,16 @@ is a nearest-neighbour search against that vector.
 3. **Build** (`vecdb build`): L2-normalise, quantise each row to int8 with a per-row scale,
    record the byte offset of every metadata line, write `data/index.bin`.
 
-### `index.bin` layout (little endian, sections 64-byte aligned)
+### `index.bin` layout (version 2; little endian, sections 64-byte aligned)
+
+The authoritative description is the comment at the top of `vecdb/src/index.rs`; v2 adds IVF
+centroids, per-cluster row ranges and a build id (checked by the Go server against vecdb).
 
 ```
 header (64 B): magic "PTKIDX01" | version u32 | dim u32 | n u64 |
                off_ids u64 | off_meta u64 | off_scales u64 | off_vecs u64 | pad
 ids     u64[n]      numeric part of OpenAlex id (W123 → 123)
-meta    u64[n+1]    byte offsets into papers.jsonl
+meta    u64[2n]     (start, end) byte range of each row's line in papers.jsonl
 scales  f32[n]      row i ≈ scales[i] * vecs[i]
 vecs    i8[n*dim]
 ```
@@ -100,9 +103,13 @@ eventfd/futex doorbell can be added later on Linux without changing the layout.
   scoring each row against all queries while it is in L1. One scan runs at a time; whatever
   queues up meanwhile forms the next batch, so throughput rises with load instead of requests
   fighting over cores (an earlier one-rayon-job-per-request design gave multi-second tails).
-* Measured on an M2 (300k × 768): ~7 ms per single query, ~580 queries/s batched.
-  If the corpus grows much larger, the next step is IVF (k-means coarse quantiser, probe a
-  few lists); the slot protocol doesn't change.
+* **IVF** for large corpora: `vecdb build` runs spherical k-means (~sqrt(n) clusters; 4,096 at
+  8.3M papers) and stores rows grouped by cluster, so each cluster is contiguous. A query scores
+  the cluster centres, then scans only its `nprobe` nearest clusters; queries in a batch that
+  probe the same cluster share its scan. `nprobe` trades recall for speed; `vecdb eval` measures
+  it. Exact scan remains available (`--nprobe 0`, and automatically below 200k papers).
+* Measured on an M2, 8.3M papers: exact ~30 queries/s; IVF with `nprobe 48` ~1,150 feed
+  requests/s end to end. See the README for recall figures.
 
 ## Recommendation policy (Go)
 
@@ -153,5 +160,7 @@ eventfd/futex doorbell can be added later on Linux without changing the layout.
   titles + abstracts (Tantivy, Meilisearch or SQLite FTS5 next to `papers.jsonl`), ideally
   combined with vecdb for hybrid keyword + semantic search. Today there is a local title-search
   fallback, but only up to 3M papers.
-- [ ] IVF (clustered) index in vecdb before loading the full 8.3M-paper corpus.
+- [x] IVF (clustered) index in vecdb (`--nprobe`, `vecdb eval`).
+- [ ] Measure recall on real SPECTER embeddings of the full corpus and tune `--nprobe`.
+- [ ] Binary quantisation + int8 re-ranking, if more speed per core is needed.
 - [ ] AVX-512 VNNI kernel for Zen 4 servers.

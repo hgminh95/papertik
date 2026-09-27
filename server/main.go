@@ -8,6 +8,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -34,6 +35,7 @@ func main() {
 	papers := flag.String("papers", "data/papers.jsonl", "paper metadata")
 	shmPath := flag.String("shm", defaultShmPath(), "vecdb shared-memory file")
 	static := flag.String("static", "web/dist", "built SPA")
+	pprofAddr := flag.String("pprof", "", "serve net/http/pprof on this address (e.g. 127.0.0.1:6060); off by default")
 	pending := flag.String("pending", "", "log of papers to ingest later (default: pending.jsonl next to -papers)")
 	flag.Parse()
 
@@ -69,7 +71,7 @@ func main() {
 		log.Printf("TURNSTILE_SECRET unset: bot verification disabled")
 	}
 
-	db := shm.NewClient(*shmPath)
+	db := shm.NewClient(*shmPath, st.BuildID)
 	if !db.Alive() {
 		log.Printf("vecdb not reachable at %s yet; serving random feed until it is", *shmPath)
 	}
@@ -85,6 +87,10 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+
+	if *pprofAddr != "" {
+		go func() { log.Println(http.ListenAndServe(*pprofAddr, nil)) }() // DefaultServeMux has the pprof handlers
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

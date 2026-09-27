@@ -68,35 +68,48 @@ If vecdb is down the server keeps serving a random feed and reconnects when it c
 
 ## Performance and sizing
 
-Measured on an Apple M2 (4 performance + 4 efficiency cores) with 1M papers, while the laptop
-was busy with other work, so treat these as lower bounds:
+Measured on an Apple M2 laptop (8 cores, 16 GB, busy with other work), with a keep-alive load
+generator on the same machine. Treat these as lower bounds for a dedicated server.
 
-| | 1M papers |
+**Full-corpus scale (8.3M papers, synthetic, 768-d):**
+
+| | |
 |---|---|
-| index (int8) | 788 MB (f32 would be 3 GB) |
-| single request, idle server | p50 13 ms |
-| sustained `/api/feed` throughput | ~270 req/s (vecdb 100% busy, batches of 16) |
-| latency at that load | p50 115 ms, p99 150 ms (32 concurrent clients) |
-| cold-start requests (no vector search) | ~17,500 req/s |
-| overload | requests over 2 s get random papers instead of failing |
+| index (int8 + IVF, 4,096 clusters) | 6.6 GB; build 3.5-4.5 min, 7 GB peak RAM |
+| personal feed, exact scan | ~30 req/s |
+| personal feed, IVF `--nprobe 48` (default) | **~1,150 req/s**, p50 55 ms / p99 63 ms at 64 concurrent, 4.4 ms for a single request |
+| cold start / Discover / shared pages (no vector search) | 21k req/s here, **~70k req/s** when the data fits in RAM (see below) |
+| Go server memory | ~560 MB (+ the page cache holding `index.bin` and `papers.jsonl`) |
 
-**Throughput scales with 1 / (number of papers)**, because every personal request scans the whole
-index; batching makes concurrent requests share that scan. Rule of thumb for this M2:
-`req/s ≈ 270 / millions of papers`. An 8-core server CPU should land in the same range; run
-`vecdb bench` on the machine to get its own figure.
+The cold-start figure at 8.3M is limited by this 16 GB laptop: the benchmark paged 2.5 GB in
+from disk during one run. The same code on the small real index (fully cached) does 55-70k
+req/s. A 64 GB server keeps the 6.6 GB index and ~12 GB of metadata resident.
+
+**Search quality vs speed** (`vecdb eval`, 8.3M papers, 160 taste-vector-like queries):
+
+| `nprobe` | share of index scanned | queries/s | recall@10, clustered data | recall@10, unclustered (worst case) | similarity of top 10 vs exact, worst case |
+|---|---|---|---|---|---|
+| exact | 100% | 30-34 | 1.000 | 1.000 | 100% |
+| 16 | 0.4% | ~1,000 | 0.995 | 0.302 | 94.5% |
+| **48** | 1.2% | ~590 | 0.999 | 0.477 | **96.8%** |
+| 128 | 3.1% | ~300 | 0.999 | 0.678 | 98.4% |
+| 256 | 6.2% | ~180 | 1.000 | 0.807 | 99.2% |
+
+(queries/s here is `vecdb eval`, which runs one batch of 16 at a time with nothing overlapping;
+use it to compare settings. The end-to-end figure above is what the running server sustained.) Real SPECTER embeddings are clustered by topic,
+so they should behave much closer to the "clustered" column; the worst case is a random low-rank
+distribution with no clusters at all. Even there, the papers returned are ~97% as similar as the
+exact top 10, and the feed samples from its candidates anyway. **Run `vecdb eval` on the real
+index once it is embedded** and set `--nprobe` from that.
 
 **Demand side:** a feed request returns 8 papers, so a user reading ~10 s per paper makes about
-1 request every 80 s. 1 req/s of capacity ≈ 80 people actively scrolling at the same time.
+1 request every 80 s: 1 req/s of capacity ≈ 80 people scrolling at the same time. At ~1,150
+personal req/s that is on the order of 90,000 concurrent readers for one 8-core machine.
 
-| corpus | index RAM | M2-equivalent capacity | ≈ concurrent active users |
-|---|---|---|---|
-| 1M papers | 0.8 GB | ~270 req/s | ~20,000 |
-| 8.3M (all English CS papers with abstracts on OpenAlex) | 6.4 GB | ~30 req/s | ~2,500 |
-
-At the full corpus the exact scan is the limit. The next step is an IVF index (cluster the
-vectors, scan a few clusters per query), which should give 10-50× more throughput with the same
-shared-memory protocol. Also note that vecdb uses NEON `sdot` on ARM and AVX2 on x86;
-AVX-512 VNNI (Zen 4 Ryzen/EPYC) is not used yet and would be a further ~2× on those CPUs.
+**Further options** if you need more: a smaller `nprobe`; binary (1 bit per dimension)
+quantisation with int8 re-ranking, which scans 8x less memory than int8; AVX-512 VNNI on Zen 4
+CPUs (~2x on the scan kernel); or a second server behind the load balancer (the service is
+stateless).
 
 ## Deploying behind Cloudflare
 

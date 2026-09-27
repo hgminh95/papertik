@@ -2,6 +2,7 @@
 //! matching fake titles, in the same format the ingest pipeline produces.
 
 use anyhow::Result;
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -114,4 +115,86 @@ pub fn generate(n: usize, dim: usize, n_topics: usize, out_dir: &Path, seed: u64
     emb.flush()?;
     eprintln!("wrote {} synthetic papers to {}", n, out_dir.display());
     Ok(())
+}
+
+/// Large synthetic corpus written straight to `papers.jsonl` + `index.bin` (no f32 file, which
+/// would be 25 GB at 8M papers). Harder than `generate`: 20 fields x 100 subtopics with heavy
+/// per-paper noise, so a paper's nearest neighbours spread over many clusters, as with real
+/// embeddings.
+pub fn generate_index(n: usize, dim: usize, n_topics: usize, out_dir: &Path, seed: u64, nlist: Option<usize>, lowrank: bool) -> Result<()> {
+    std::fs::create_dir_all(out_dir)?;
+    const SUB: usize = 100;
+    // `lowrank`: no clusters at all, v = A·z + noise with z in R^64. The hardest case for IVF
+    // (and less structured than real embeddings), used for a pessimistic recall estimate.
+    const RANK: usize = 64;
+    const CHUNK: usize = 8192;
+    let n_topics = n_topics.clamp(1, TOPICS.len());
+    let mut rng = Rng::new(seed);
+    let fields: Vec<Vec<f32>> = (0..n_topics).map(|_| (0..dim).map(|_| rng.gauss()).collect()).collect();
+    let subs: Vec<Vec<Vec<f32>>> =
+        (0..n_topics).map(|_| (0..SUB).map(|_| (0..dim).map(|_| rng.gauss()).collect()).collect()).collect();
+    let basis: Vec<Vec<f32>> = (0..RANK).map(|_| (0..dim).map(|_| rng.gauss()).collect()).collect();
+
+    let mut papers = BufWriter::with_capacity(8 << 20, File::create(out_dir.join("papers.jsonl"))?);
+    let mut b = crate::index::Builder::new(dim, n);
+    let mut pos = 0u64;
+    let t = std::time::Instant::now();
+    let chunks = n.div_ceil(CHUNK);
+    for group in (0..chunks).collect::<Vec<_>>().chunks(rayon::current_num_threads() * 2) {
+        let made: Vec<Vec<(String, Vec<i8>, f32)>> = group
+            .par_iter()
+            .map(|&c| {
+                let mut rng = Rng::new(seed ^ (c as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                let mut v = vec![0f32; dim];
+                (c * CHUNK..((c + 1) * CHUNK).min(n))
+                    .map(|i| {
+                        let t = (rng.next_u64() % n_topics as u64) as usize;
+                        let s = (rng.next_u64() % SUB as u64) as usize;
+                        if lowrank {
+                            v.iter_mut().for_each(|x| *x = 0.3 * rng.gauss());
+                            for b in &basis {
+                                let z = rng.gauss();
+                                v.iter_mut().zip(b).for_each(|(x, y)| *x += z * y);
+                            }
+                        } else {
+                            for (j, x) in v.iter_mut().enumerate() {
+                                *x = 0.5 * fields[t][j] + 0.6 * subs[t][s][j] + rng.gauss();
+                            }
+                        }
+                        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                        v.iter_mut().for_each(|x| *x /= norm);
+                        let (q, scale) = crate::search::quantize(&v);
+                        let (field, kws) = TOPICS[t];
+                        let title = format!("{} {} {} {} (#{})", rng.pick(ADJ), rng.pick(kws), rng.pick(CONN), rng.pick(kws), s);
+                        let row = serde_json::json!({
+                            "id": format!("W{}", 1_000_000 + i),
+                            "title": title,
+                            "abstract": format!("Synthetic paper #{i} in {field}, subtopic {s}. Used to measure PaperTok at full-corpus scale."),
+                            "authors": [format!("{} {}", rng.pick(FIRST), rng.pick(LAST))],
+                            "year": 2000 + (rng.next_u64() % 26),
+                            "venue": rng.pick(VENUES),
+                            "field": field,
+                            "cited_by": rng.next_u64() % 5000,
+                        });
+                        (row.to_string(), q, scale)
+                    })
+                    .collect()
+            })
+            .collect();
+        for chunk in made {
+            for (line, q, scale) in chunk {
+                let i = b.len();
+                papers.write_all(line.as_bytes())?;
+                papers.write_all(b"\n")?;
+                let len = line.len() as u64 + 1;
+                b.push_quantized(1_000_000 + i as u64, [pos, pos + len], &q, scale);
+                pos += len;
+            }
+        }
+        eprint!("\r  generated {} / {} papers ({:.0}s)", b.len(), n, t.elapsed().as_secs_f64());
+    }
+    papers.flush()?;
+    eprintln!();
+    let nlist = nlist.unwrap_or_else(|| crate::index::auto_nlist(n));
+    b.finish(nlist, &out_dir.join("index.bin"), seed)
 }

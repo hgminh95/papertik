@@ -55,6 +55,7 @@ type region struct {
 	maxExclude int
 	slotSize   int
 	indexN     int
+	buildID    uint64
 	next       atomic.Uint32
 }
 
@@ -91,6 +92,7 @@ func openRegion(path string) (*region, error) {
 	r.maxExclude = int(le.Uint32(mem[24:]))
 	r.slotSize = int(le.Uint32(mem[28:]))
 	r.indexN = int(le.Uint32(mem[44:]))
+	r.buildID = le.Uint64(mem[48:])
 	if headerSize+r.numSlots*r.slotSize > len(mem) {
 		syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: truncated", path)
@@ -110,18 +112,21 @@ func (r *region) slot(i int) int { return headerSize + i*r.slotSize }
 
 // Client talks to vecdb. It reconnects transparently when vecdb restarts.
 type Client struct {
-	path string
-	mu   sync.Mutex
-	r    *region
+	path    string
+	buildID uint64 // of our own index; results from a vecdb serving another build are meaningless
+	mu      sync.Mutex
+	r       *region
 }
 
-func NewClient(path string) *Client { return &Client{path: path} }
+// NewClient connects to the vecdb at path, which must serve the index with the given build id
+// (row numbers differ between builds, e.g. while a new index is being rolled out).
+func NewClient(path string, buildID uint64) *Client { return &Client{path: path, buildID: buildID} }
 
 // get returns a live region, (re)opening the file if needed.
 func (c *Client) get() (*region, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.r != nil && c.r.alive() {
+	if c.r != nil && c.r.alive() && c.r.buildID == c.buildID {
 		return c.r, nil
 	}
 	r, err := openRegion(c.path)
@@ -131,6 +136,10 @@ func (c *Client) get() (*region, error) {
 	if !r.alive() {
 		syscall.Munmap(r.mem)
 		return nil, fmt.Errorf("%w: stale heartbeat", ErrUnavailable)
+	}
+	if r.buildID != c.buildID {
+		syscall.Munmap(r.mem)
+		return nil, fmt.Errorf("%w: vecdb serves index build %x, this server loaded %x (restart the one with the old index)", ErrUnavailable, r.buildID, c.buildID)
 	}
 	// The previous mapping may still be referenced by in-flight requests; it is small, so
 	// it is intentionally leaked rather than unmapped under them.

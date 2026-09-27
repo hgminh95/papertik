@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"papertok/server/internal/feed"
 	"papertok/server/internal/shm"
@@ -57,7 +58,7 @@ func New(cfg Config, s *store.Store, db *shm.Client, rec *feed.Recommender) (*Se
 		pending:  pending,
 	}
 	if cfg.PapersPath != "" {
-		go srv.explore.build(cfg.PapersPath, s.N)
+		go srv.explore.build(cfg.PapersPath, s.Row)
 	}
 	return srv, nil
 }
@@ -173,7 +174,7 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	var items []feed.Item
 	if req.Mode == "top" {
 		if pref == nil {
-			writeJSON(w, map[string]any{"papers": []feedPaper{}})
+			s.writePapers(w, nil, "")
 			return
 		}
 		items = s.rec.Top(ctx, pref, seen, k)
@@ -181,17 +182,11 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		items = s.rec.Next(ctx, pref, seen, k)
 	}
 
-	out := make([]feedPaper, 0, len(items))
-	for _, it := range items {
-		p, err := s.store.Paper(it.Row)
-		if err != nil {
-			log.Printf("feed: read paper %d: %v", it.Row, err)
-			continue
-		}
-		vec, scale := s.vector(it.Row)
-		out = append(out, feedPaper{Paper: p, Vec: vec, Scale: scale, Score: it.Score, Reason: it.Reason, Indexed: true})
+	rows := make([]rowOut, len(items))
+	for i, it := range items {
+		rows[i] = rowOut{it.Row, it.Score, it.Reason}
 	}
-	writeJSON(w, map[string]any{"papers": out})
+	s.writePapers(w, rows, "")
 }
 
 func (s *Server) vector(row uint32) (string, float32) {
@@ -236,12 +231,12 @@ func decodePref(b64 string, dim int) ([]float32, bool) {
 	return v, true
 }
 
+// int8Bytes views the vector as bytes without copying (same memory, same bits).
 func int8Bytes(q []int8) []byte {
-	b := make([]byte, len(q))
-	for i, x := range q {
-		b[i] = byte(x)
+	if len(q) == 0 {
+		return nil
 	}
-	return b
+	return unsafe.Slice((*byte)(unsafe.Pointer(&q[0])), len(q))
 }
 
 // ---- static SPA ----

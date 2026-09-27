@@ -109,20 +109,13 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	out := []feedPaper{}
+	var out []rowOut
 	for _, id := range req.IDs {
-		row, ok := s.store.Row(id)
-		if !ok {
-			continue
+		if row, ok := s.store.Row(id); ok {
+			out = append(out, rowOut{row: row, reason: "shared"})
 		}
-		p, err := s.store.Paper(row)
-		if err != nil {
-			continue
-		}
-		vec, scale := s.vector(row)
-		out = append(out, feedPaper{Paper: p, Vec: vec, Scale: scale, Reason: "shared", Indexed: true})
 	}
-	writeJSON(w, map[string]any{"papers": out})
+	s.writePapers(w, out, "")
 }
 
 func (s *Server) dequantize(row uint32) []float32 {

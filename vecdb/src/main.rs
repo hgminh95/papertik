@@ -31,6 +31,9 @@ enum Cmd {
         dim: usize,
         #[arg(long, default_value = "data/index.bin")]
         out: PathBuf,
+        /// IVF clusters (0 = exact search only; default: none below 200k papers, else ~sqrt(n))
+        #[arg(long)]
+        nlist: Option<usize>,
     },
     /// Serve top-k queries over shared memory
     Serve {
@@ -47,8 +50,11 @@ enum Cmd {
         /// Worker threads (0 = all cores)
         #[arg(long, default_value_t = 0)]
         threads: usize,
+        /// IVF clusters to scan per query (0 = exact scan). Higher = better recall, slower.
+        #[arg(long, default_value_t = 48)]
+        nprobe: usize,
     },
-    /// Generate a synthetic dataset (papers.jsonl + embeddings.f32)
+    /// Generate a synthetic dataset (papers.jsonl + embeddings.f32, or an index directly)
     Synth {
         #[arg(long, default_value_t = 100_000)]
         n: usize,
@@ -60,6 +66,26 @@ enum Cmd {
         out: PathBuf,
         #[arg(long, default_value_t = 42)]
         seed: u64,
+        /// Write papers.jsonl + index.bin directly (no f32 embeddings file; needed for large n)
+        #[arg(long)]
+        index: bool,
+        /// With --index: IVF clusters (default ~sqrt(n))
+        #[arg(long)]
+        nlist: Option<usize>,
+        /// With --index: unclustered low-rank vectors (worst case for IVF)
+        #[arg(long)]
+        lowrank: bool,
+    },
+    /// Recall and speed of IVF search against the exact scan, for several nprobe values
+    Eval {
+        #[arg(long, default_value = "data/index.bin")]
+        index: PathBuf,
+        #[arg(long, default_value_t = 200)]
+        queries: usize,
+        #[arg(long, default_value_t = 100)]
+        k: usize,
+        #[arg(long, value_delimiter = ',', default_value = "8,16,32,48,64,128")]
+        nprobe: Vec<usize>,
     },
     /// Measure search latency with random queries
     Bench {
@@ -82,14 +108,21 @@ const fn default_shm_path() -> &'static str {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Build { papers, embeddings, dim, out } => index::build(&papers, &embeddings, dim, &out),
-        Cmd::Synth { n, dim, topics, out, seed } => synth::generate(n, dim, topics, &out, seed),
+        Cmd::Build { papers, embeddings, dim, out, nlist } => index::build(&papers, &embeddings, dim, nlist, &out),
+        Cmd::Synth { n, dim, topics, out, seed, index, nlist, lowrank } => {
+            if index {
+                synth::generate_index(n, dim, topics, &out, seed, nlist, lowrank)
+            } else {
+                synth::generate(n, dim, topics, &out, seed)
+            }
+        }
         Cmd::Bench { index, queries, k } => bench(&index, queries, k),
-        Cmd::Serve { index, shm, slots, max_k, max_exclude, threads } => {
+        Cmd::Eval { index, queries, k, nprobe } => eval(&index, queries, k, &nprobe),
+        Cmd::Serve { index, shm, slots, max_k, max_exclude, threads, nprobe } => {
             if threads > 0 {
                 rayon::ThreadPoolBuilder::new().num_threads(threads).build_global()?;
             }
-            serve(&index, &shm, slots, max_k, max_exclude)
+            serve(&index, &shm, slots, max_k, max_exclude, nprobe)
         }
     }
 }
@@ -100,21 +133,23 @@ extern "C" fn on_signal(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);
 }
 
-fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, max_exclude: usize) -> Result<()> {
+fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, max_exclude: usize, nprobe: usize) -> Result<()> {
     let index: &'static Index = Box::leak(Box::new(Index::open(index_path)?));
     let geo = Geometry { num_slots: slots, dim: index.dim, max_k, max_exclude };
-    let region: &'static Region = Box::leak(Box::new(Region::create(shm_path, geo, index.n)?));
+    let region: &'static Region = Box::leak(Box::new(Region::create(shm_path, geo, index.n, index.build_id)?));
+    let nprobe = if index.nlist == 0 { 0 } else { nprobe };
     unsafe {
         libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
     }
     eprintln!(
-        "vecdb: serving {} papers (dim {}) on {} with {} slots, {} threads",
+        "vecdb: serving {} papers (dim {}) on {} with {} slots, {} threads, {}",
         index.n,
         index.dim,
         shm_path.display(),
         slots,
-        rayon::current_num_threads()
+        rayon::current_num_threads(),
+        if nprobe == 0 { "exact search".to_string() } else { format!("IVF {} of {} clusters per query", nprobe, index.nlist) }
     );
 
     let mut idle: u32 = 0;
@@ -132,12 +167,12 @@ fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, m
                 found = true;
                 batch.push(slot);
                 if batch.len() == MAX_BATCH {
-                    stats.scan(index, std::mem::take(&mut batch));
+                    stats.scan(index, std::mem::take(&mut batch), nprobe);
                 }
             }
         }
         if !batch.is_empty() {
-            stats.scan(index, batch);
+            stats.scan(index, batch, nprobe);
         }
         if last_beat.elapsed() >= Duration::from_millis(100) {
             region.heartbeat();
@@ -179,11 +214,11 @@ impl Default for Stats {
 }
 
 impl Stats {
-    fn scan(&mut self, index: &Index, batch: Vec<shm::Slot<'_>>) {
+    fn scan(&mut self, index: &Index, batch: Vec<shm::Slot<'_>>, nprobe: usize) {
         let t = Instant::now();
         self.queries += batch.len() as u64;
         self.scans += 1;
-        handle(index, batch);
+        handle(index, batch, nprobe);
         self.busy += t.elapsed();
     }
 
@@ -208,7 +243,7 @@ impl Stats {
 /// Queries per scan. Beyond this the per-row work stops fitting the cache well.
 const MAX_BATCH: usize = 16;
 
-fn handle(index: &Index, slots: Vec<shm::Slot<'_>>) {
+fn handle(index: &Index, slots: Vec<shm::Slot<'_>>, nprobe: usize) {
     let mut valid = Vec::with_capacity(slots.len());
     for slot in slots {
         let k = slot.k();
@@ -224,7 +259,7 @@ fn handle(index: &Index, slots: Vec<shm::Slot<'_>>) {
         .zip(&excludes)
         .map(|(s, exclude)| search::Query { q: s.query(), k: s.k(), exclude })
         .collect();
-    let results = search::search_batch(index, &queries);
+    let results = search::search_batch_ivf(index, &queries, nprobe);
     for (slot, hits) in valid.iter().zip(results) {
         let r: Vec<(u32, f32)> = hits.iter().map(|h| (h.row, h.score)).collect();
         slot.complete(shm::STATUS_OK, &r);
@@ -275,6 +310,78 @@ fn bench_batch(index: &Index, k: usize) -> Result<()> {
         }
         let per = t.elapsed().as_secs_f64() / reps as f64;
         println!("batch {:>2}: {:.2} ms per scan, {:.0} queries/s", b, per * 1e3, b as f64 / per);
+    }
+    Ok(())
+}
+
+/// Taste-vector-like queries: the average of 1-4 random papers, like a user's liked papers.
+fn sample_queries(index: &Index, n: usize, seed: u64) -> Vec<Vec<f32>> {
+    let mut rng = synth::Rng::new(seed);
+    let dim = index.dim;
+    (0..n)
+        .map(|_| {
+            let mut q = vec![0f32; dim];
+            for _ in 0..1 + rng.next_u64() % 4 {
+                let r = (rng.next_u64() % index.n as u64) as usize;
+                let s = index.scales()[r];
+                for (a, &x) in q.iter_mut().zip(&index.vecs()[r * dim..(r + 1) * dim]) {
+                    *a += x as f32 * s;
+                }
+            }
+            let norm = q.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
+            q.iter_mut().for_each(|x| *x /= norm);
+            q
+        })
+        .collect()
+}
+
+fn eval(index_path: &PathBuf, n: usize, k: usize, nprobes: &[usize]) -> Result<()> {
+    let index = Index::open(index_path)?;
+    let qs = sample_queries(&index, n, 5);
+    let none = HashSet::new();
+    let queries: Vec<search::Query> = qs.iter().map(|q| search::Query { q, k, exclude: &none }).collect();
+    let batch = 16;
+    let run = |nprobe: usize| -> (Vec<Vec<search::Hit>>, f64) {
+        let t = Instant::now();
+        let out: Vec<Vec<search::Hit>> =
+            queries.chunks(batch).flat_map(|c| search::search_batch_ivf(&index, c, nprobe)).collect();
+        (out, queries.len() as f64 / t.elapsed().as_secs_f64())
+    };
+    eprintln!("computing exact results for {} queries…", n);
+    let (exact, exact_qps) = run(0);
+    println!(
+        "n={} dim={} lists={} k={} queries={} (batches of {}, {} threads)",
+        index.n, index.dim, index.nlist, k, n, batch, rayon::current_num_threads()
+    );
+    // Recall asks "did we find the exact top 10"; for a feed what matters is whether the papers
+    // found are as relevant, i.e. their similarity relative to the exact top 10's.
+    let mean_score = |hits: &[Vec<search::Hit>], m: usize| -> Vec<f64> {
+        hits.iter().map(|h| h.iter().take(m).map(|x| x.score as f64).sum::<f64>() / m.min(h.len()).max(1) as f64).collect()
+    };
+    let exact10 = mean_score(&exact, 10);
+    println!("{:>8}  {:>10}  {:>10}  {:>13}  {:>9}  {:>8}", "nprobe", "recall@10", "recall@100", "similarity@10", "scanned", "q/s");
+    println!("{:>8}  {:>10}  {:>10}  {:>13}  {:>9}  {:>8.0}", "exact", "1.000", "1.000", "100.0%", "100%", exact_qps);
+    for &p in nprobes {
+        if index.nlist == 0 || p >= index.nlist {
+            continue;
+        }
+        let (approx, qps) = run(p);
+        let recall = |m: usize| {
+            let mut hit = 0usize;
+            let mut tot = 0usize;
+            for (e, a) in exact.iter().zip(&approx) {
+                let truth: HashSet<u32> = e.iter().take(m).map(|h| h.row).collect();
+                hit += a.iter().take(m).filter(|h| truth.contains(&h.row)).count();
+                tot += truth.len();
+            }
+            hit as f64 / tot.max(1) as f64
+        };
+        let scanned = p as f64 / index.nlist as f64 * 100.0;
+        let sim: f64 = mean_score(&approx, 10).iter().zip(&exact10).map(|(a, e)| a / e).sum::<f64>() / exact10.len() as f64;
+        println!(
+            "{:>8}  {:>10.3}  {:>10.3}  {:>12.1}%  {:>8.1}%  {:>8.0}",
+            p, recall(10), recall(k), sim * 100.0, scanned, qps
+        );
     }
     Ok(())
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/heap"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -77,8 +78,8 @@ type explorer struct {
 	recent map[string][]uint32 // same, limited to recent papers
 }
 
-// build streams papers.jsonl (row i = line i) in the background.
-func (e *explorer) build(papersPath string, n int) {
+// build streams papers.jsonl in the background.
+func (e *explorer) build(papersPath string, rowOf func(id string) (uint32, bool)) {
 	start := time.Now()
 	f, err := os.Open(papersPath)
 	if err != nil {
@@ -94,16 +95,22 @@ func (e *explorer) build(papersPath string, n int) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	var row struct {
+		ID      string `json:"id"`
 		Field   string `json:"field"`
 		Year    int    `json:"year"`
 		CitedBy int    `json:"cited_by"`
 	}
-	for i := 0; i < n && sc.Scan(); i++ {
-		row.Field, row.Year, row.CitedBy = "", 0, 0
+	for sc.Scan() {
+		row.ID, row.Field, row.Year, row.CitedBy = "", "", 0, 0
 		if json.Unmarshal(sc.Bytes(), &row) != nil {
 			continue
 		}
-		r := ranked{uint32(i), row.CitedBy}
+		// The index stores rows grouped by cluster, so line i is not row i: look the row up.
+		idx, ok := rowOf(row.ID)
+		if !ok {
+			continue // not in the index (e.g. papers.jsonl has lines not embedded yet)
+		}
+		r := ranked{idx, row.CitedBy}
 		cited[exploreAll].offer(r)
 		if row.Year >= minYear {
 			recent[exploreAll].offer(r)
@@ -167,14 +174,9 @@ func (s *Server) handleExplorePapers(w http.ResponseWriter, r *http.Request) {
 	s.explore.mu.RUnlock()
 
 	lo, hi := min((page-1)*explorePerPage, len(rows)), min(page*explorePerPage, len(rows))
-	out := make([]feedPaper, 0, hi-lo)
+	out := make([]rowOut, 0, hi-lo)
 	for _, row := range rows[lo:hi] {
-		p, err := s.store.Paper(row)
-		if err != nil {
-			continue
-		}
-		vec, scale := s.vector(row)
-		out = append(out, feedPaper{Paper: p, Vec: vec, Scale: scale, Reason: "random", Indexed: true})
+		out = append(out, rowOut{row: row, reason: "random"})
 	}
-	writeJSON(w, map[string]any{"ready": ready, "papers": out, "more": hi < len(rows)})
+	s.writePapers(w, out, fmt.Sprintf(`,"ready":%t,"more":%t`, ready, hi < len(rows)))
 }

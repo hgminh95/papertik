@@ -27,7 +27,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 		}
 	}
 	run("synth", "--n", "5000", "--dim", "64", "--topics", "8", "--out", dir)
-	run("build", "--papers", dir+"/papers.jsonl", "--embeddings", dir+"/embeddings.f32", "--dim", "64", "--out", dir+"/index.bin")
+	run("build", "--papers", dir+"/papers.jsonl", "--embeddings", dir+"/embeddings.f32", "--dim", "64", "--nlist", "0", "--out", dir+"/index.bin")
 
 	shmPath := filepath.Join(dir, "shm")
 	cmd := exec.Command(bin, "serve", "--index", dir+"/index.bin", "--shm", shmPath, "--slots", "8", "--max-k", "32", "--max-exclude", "16")
@@ -40,7 +40,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := shm.NewClient(shmPath)
+	c := shm.NewClient(shmPath, st.BuildID)
 	for i := 0; !c.Alive(); i++ {
 		if i > 100 {
 			t.Fatal("vecdb did not come up")
@@ -102,6 +102,11 @@ func TestSearchAgainstVecdb(t *testing.T) {
 		if err != nil {
 			t.Fatalf("concurrent search: %v", err)
 		}
+	}
+
+	// A client that loaded a different build of the index must not use this vecdb.
+	if other := shm.NewClient(shmPath, st.BuildID+1); other.Alive() {
+		t.Fatal("client with a different index build accepted vecdb")
 	}
 
 	// Stopping vecdb is noticed immediately.

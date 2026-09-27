@@ -14,6 +14,7 @@
 //!  32  heartbeat_ms u64  (atomic, unix millis, bumped by vecdb)
 //!  40  pid          u32
 //!  44  index_n      u32
+//!  48  build_id     u64  (of the index being served; the client checks it matches its own)
 //! slot i at 128 + i*slot_size
 //!   0  state        u32  (atomic, see STATE_*)
 //!   4  op           u32
@@ -90,7 +91,7 @@ unsafe impl Sync for Region {}
 
 impl Region {
     /// Create (replacing any existing file) and initialise the region.
-    pub fn create(path: &Path, geo: Geometry, index_n: usize) -> Result<Region> {
+    pub fn create(path: &Path, geo: Geometry, index_n: usize, build_id: u64) -> Result<Region> {
         let _ = std::fs::remove_file(path); // clients holding the old inode will see a stale heartbeat and remap
         let file = OpenOptions::new()
             .read(true)
@@ -114,6 +115,7 @@ impl Region {
             r.put_u32(28, geo.slot_size() as u32);
             r.put_u32(40, std::process::id());
             r.put_u32(44, index_n as u32);
+            (r.base.add(48) as *mut u64).write(build_id);
         }
         r.heartbeat();
         r.atomic_u64(0).store(MAGIC, Ordering::Release);
