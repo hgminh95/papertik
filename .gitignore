@@ -6,3 +6,4 @@ web/node_modules/
 web/dist/
 *.cursor
 .DS_Store
+__pycache__/
