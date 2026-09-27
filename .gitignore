@@ -1,0 +1,8 @@
+data/
+data-*/
+vecdb/target/
+server/bin/
+web/node_modules/
+web/dist/
+*.cursor
+.DS_Store

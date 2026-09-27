@@ -1,0 +1,16 @@
+[Unit]
+Description=PaperTok HTTP server
+After=network.target papertok-vecdb.service
+Wants=papertok-vecdb.service
+
+[Service]
+User=papertok
+WorkingDirectory=/opt/papertok
+# TURNSTILE_SITEKEY, TURNSTILE_SECRET, SESSION_KEY (hex, >=16 bytes)
+EnvironmentFile=/etc/papertok.env
+ExecStart=/opt/papertok/bin/server -addr 127.0.0.1:8080 -index data/index.bin -papers data/papers.jsonl -shm /dev/shm/papertok -static web/dist
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

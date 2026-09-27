@@ -1,0 +1,12 @@
+# Cloudflare Tunnel: the origin has no open inbound ports; cloudflared dials out to Cloudflare.
+#   cloudflared tunnel create papertok
+#   cloudflared tunnel route dns papertok papertok.example.com
+tunnel: papertok
+credentials-file: /etc/cloudflared/papertok.json
+
+ingress:
+  - hostname: papertok.example.com
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 5s
+  - service: http_status:404

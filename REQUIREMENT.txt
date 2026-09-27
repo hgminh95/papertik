@@ -1,0 +1,16 @@
+Tiktok like website, but for paper instead of short video
+
+## High level overview
+
+- Get all computer science paper from OpenAlex, pre-indexed it with model (e.g. allenai/specter) to convert into vector
+- Each user has a preference vector, which is average over all: new interest vector = (current vector + new paper vector (that user like)) / 2. Preference vector are stored in local storage
+- Each request we return a list of paper that user possibly like, and the frontend display that
+
+## Technical requirements
+
+- Tiktok like UI
+- Server in Go
+- Client side in Svelte
+- User data is stored in browser
+- Cloudflare for bot detection, proxy, etc
+- Implement your own vector database, for this specific purpose, probably in Rust, communicate with webserver via shared memory
