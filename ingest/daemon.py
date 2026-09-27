@@ -201,9 +201,10 @@ class Ingest:
         return added
 
     def fetch_backfill(self) -> int:
-        """A few pages of the full crawl, most cited first."""
+        """A few pages of the full crawl, most cited first. Returns works scanned (not only
+        added: pages of papers we already have are still progress, and must not look idle)."""
         s = self.state
-        added = 0
+        added = scanned = 0
         for _ in range(self.a.pages_per_round):
             if s["backfill_done"] or self.stop:
                 break
@@ -211,6 +212,7 @@ class Ingest:
                                  "per-page": "200", "cursor": s["backfill_cursor"]})
             s["backfill_total"] = res["meta"].get("count", s["backfill_total"])
             s["backfill_seen"] += len(res["results"])
+            scanned += len(res["results"])
             added += self.append([r for r in (fetch.convert(w) for w in res["results"]) if r])
             cursor = res["meta"].get("next_cursor")
             if not cursor or not res["results"]:
@@ -220,7 +222,11 @@ class Ingest:
             else:
                 s["backfill_cursor"] = cursor
             self.save_state()
-        return added
+        if scanned:
+            total = s["backfill_total"] or 0
+            log(f"backfill: scanned {s['backfill_seen']:,} of {total:,} ({100 * s['backfill_seen'] / max(total, 1):.2f}%), "
+                f"{added} new this round, {self.lines - self.embedded:,} waiting to embed")
+        return scanned
 
     def fetch_new(self) -> int:
         """Papers published recently (with a margin for late indexing by OpenAlex)."""
@@ -236,7 +242,7 @@ class Ingest:
         s["last_new_check"] = now()
         self.save_state()
         log(f"new papers since {since}: {seen} seen, {added} added")
-        return added
+        return seen
 
     # ---- embedding and index ----
 
@@ -277,6 +283,8 @@ class Ingest:
                 out.flush()
                 done += len(part)
                 self.embedded += len(part)
+                if s + chunk >= len(texts) or (s // chunk) % 4 == 3:
+                    log(f"embedded {self.embedded:,} papers ({self.rate:.1f}/s), {self.lines - self.embedded:,} waiting")
                 r = len(part) / max(time.time() - t, 1e-6)
                 self.rate = r if self.rate == 0 else 0.8 * self.rate + 0.2 * r
                 self.status()
