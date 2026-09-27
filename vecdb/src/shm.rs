@@ -14,7 +14,9 @@
 //!  32  heartbeat_ms u64  (atomic, unix millis, bumped by vecdb)
 //!  40  pid          u32
 //!  44  index_n      u32
-//!  48  build_id     u64  (of the index being served; the client checks it matches its own)
+//!  48  build_id     u64  (atomic; of the index being served, changes on hot reload)
+//!  56  queries      u64  (atomic, total queries answered)     64 busy_ns u64 (atomic, total scan time)
+//!  72  started_ms   u64  (unix millis)                         80 nprobe u32   84 nlist u32
 //! slot i at 128 + i*slot_size
 //!   0  state        u32  (atomic, see STATE_*)
 //!   4  op           u32
@@ -22,7 +24,7 @@
 //!  12  n_exclude    u32
 //!  16  status       u32
 //!  20  n_results    u32
-//!  24  req_id       u64
+//!  24  build_id     u64  (index build the request's row numbers refer to; mismatch -> STATUS_STALE)
 //!  64  query          f32[dim]
 //!      exclude        u32[max_exclude]
 //!      result_rows    u32[max_k]
@@ -53,6 +55,7 @@ pub const OP_SEARCH: u32 = 1;
 
 pub const STATUS_OK: u32 = 0;
 pub const STATUS_BAD_REQUEST: u32 = 1;
+pub const STATUS_STALE: u32 = 2;
 
 #[derive(Clone, Copy)]
 pub struct Geometry {
@@ -116,6 +119,8 @@ impl Region {
             r.put_u32(40, std::process::id());
             r.put_u32(44, index_n as u32);
             (r.base.add(48) as *mut u64).write(build_id);
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            (r.base.add(72) as *mut u64).write(now);
         }
         r.heartbeat();
         r.atomic_u64(0).store(MAGIC, Ordering::Release);
@@ -136,6 +141,25 @@ impl Region {
             .unwrap()
             .as_millis() as u64;
         self.atomic_u64(32).store(now, Ordering::Release);
+    }
+
+    /// A new index build is being served (hot reload).
+    pub fn set_index(&self, n: usize, build_id: u64) {
+        unsafe { (self.base.add(44) as *const AtomicU32).as_ref().unwrap().store(n as u32, Ordering::Relaxed) };
+        self.atomic_u64(48).store(build_id, Ordering::Release);
+    }
+
+    pub fn set_search(&self, nprobe: usize, nlist: usize) {
+        unsafe {
+            (self.base.add(80) as *const AtomicU32).as_ref().unwrap().store(nprobe as u32, Ordering::Relaxed);
+            (self.base.add(84) as *const AtomicU32).as_ref().unwrap().store(nlist as u32, Ordering::Relaxed);
+        }
+    }
+
+    /// Running totals for the status page (the Go server turns them into rates).
+    pub fn add_stats(&self, queries: u64, busy_ns: u64) {
+        self.atomic_u64(56).fetch_add(queries, Ordering::Relaxed);
+        self.atomic_u64(64).fetch_add(busy_ns, Ordering::Relaxed);
     }
 
     /// Tell clients immediately that we are gone (a zero heartbeat is always stale).
@@ -184,6 +208,9 @@ impl<'a> Slot<'a> {
     }
     pub fn n_exclude(&self) -> usize {
         self.u32_at(12) as usize
+    }
+    pub fn build_id(&self) -> u64 {
+        unsafe { (self.base.add(24) as *const u64).read() }
     }
 
     pub fn query(&self) -> &[f32] {

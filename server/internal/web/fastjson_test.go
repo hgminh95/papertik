@@ -32,9 +32,9 @@ func TestWritePapersMatchesStructs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{store: st}
+	s := &Server{}
 	rec := httptest.NewRecorder()
-	s.writePapers(rec, []rowOut{{row: 3, score: 0.5, reason: "for-you"}, {row: 7, reason: "random"}}, `,"more":true`)
+	s.writePapers(rec, st, []rowOut{{row: 3, score: 0.5, reason: "for-you"}, {row: 7, reason: "random"}}, `,"more":true`)
 
 	var got struct {
 		Papers []map[string]any `json:"papers"`

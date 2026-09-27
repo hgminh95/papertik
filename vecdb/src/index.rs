@@ -365,9 +365,7 @@ pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>,
     let emb_file = File::open(embeddings).with_context(|| format!("open {}", embeddings.display()))?;
     let emb = unsafe { Mmap::map(&emb_file)? };
     let row_bytes = dim * 4;
-    if emb.len() % row_bytes != 0 {
-        bail!("embeddings size {} is not a multiple of {}", emb.len(), row_bytes);
-    }
+    // A partial last row means the embedder is mid-write; index the complete rows.
     let n_emb = emb.len() / row_bytes;
 
     // Stop at the number of embedded rows (embedding may still be in progress).

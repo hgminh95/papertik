@@ -86,6 +86,7 @@ var paperBody = template.Must(template.New("body").Parse(`<article id="seo" clas
 
 // GET /p/{id}: a shareable, indexable page for one paper; the SPA takes over once loaded.
 func (s *Server) handlePaperPage(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	page, err := s.index.get(filepath.Join(s.cfg.StaticDir, "index.html"))
 	if err != nil {
 		http.Error(w, "not built", http.StatusInternalServerError)
@@ -95,10 +96,10 @@ func (s *Server) handlePaperPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 
 	id := strings.ToUpper(r.PathValue("id"))
-	row, ok := s.store.Row(id)
+	row, ok := st.Row(id)
 	var p store.Paper
 	if ok {
-		p, err = s.store.Paper(row)
+		p, err = st.Paper(row)
 		ok = err == nil
 	}
 	if !ok {
@@ -197,11 +198,12 @@ func (s *Server) handleRobots(w http.ResponseWriter, r *http.Request) {
 
 // GET /sitemap.xml: a sitemap index pointing at /sitemaps/{n}.xml.
 func (s *Server) handleSitemapIndex(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	base := s.baseURL(r)
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	fmt.Fprint(w, `<?xml version="1.0" encoding="UTF-8"?>`+"\n"+`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`+"\n")
-	for i := 0; i*sitemapChunk < s.store.N; i++ {
+	for i := 0; i*sitemapChunk < st.N; i++ {
 		fmt.Fprintf(w, "  <sitemap><loc>%s/sitemaps/%d.xml</loc></sitemap>\n", base, i)
 	}
 	fmt.Fprint(w, "</sitemapindex>\n")
@@ -209,8 +211,9 @@ func (s *Server) handleSitemapIndex(w http.ResponseWriter, r *http.Request) {
 
 // GET /sitemaps/{n}.xml: up to 50k paper URLs.
 func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	n, err := strconv.Atoi(strings.TrimSuffix(r.PathValue("file"), ".xml"))
-	if err != nil || n < 0 || n*sitemapChunk >= s.store.N {
+	if err != nil || n < 0 || n*sitemapChunk >= st.N {
 		http.NotFound(w, r)
 		return
 	}
@@ -221,8 +224,8 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 	if n == 0 {
 		fmt.Fprintf(w, "  <url><loc>%s/</loc><changefreq>daily</changefreq></url>\n", base)
 	}
-	for row := n * sitemapChunk; row < min((n+1)*sitemapChunk, s.store.N); row++ {
-		fmt.Fprintf(w, "  <url><loc>%s/p/W%d</loc></url>\n", base, s.store.ID(uint32(row)))
+	for row := n * sitemapChunk; row < min((n+1)*sitemapChunk, st.N); row++ {
+		fmt.Fprintf(w, "  <url><loc>%s/p/W%d</loc></url>\n", base, st.ID(uint32(row)))
 	}
 	fmt.Fprint(w, "</urlset>\n")
 }

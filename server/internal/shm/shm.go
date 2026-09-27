@@ -31,7 +31,8 @@ const (
 
 	opSearch = 1
 
-	statusOK = 0
+	statusOK    = 0
+	statusStale = 2 // vecdb serves a different build of the index than the request refers to
 
 	// vecdb bumps the heartbeat every 100ms; older than this means it is gone.
 	staleAfter = 2 * time.Second
@@ -39,6 +40,7 @@ const (
 
 var (
 	ErrUnavailable = errors.New("vecdb unavailable")
+	ErrStale       = fmt.Errorf("%w: vecdb serves another build of the index", ErrUnavailable)
 	ErrBadRequest  = errors.New("vecdb rejected request")
 )
 
@@ -55,7 +57,6 @@ type region struct {
 	maxExclude int
 	slotSize   int
 	indexN     int
-	buildID    uint64
 	next       atomic.Uint32
 }
 
@@ -92,7 +93,6 @@ func openRegion(path string) (*region, error) {
 	r.maxExclude = int(le.Uint32(mem[24:]))
 	r.slotSize = int(le.Uint32(mem[28:]))
 	r.indexN = int(le.Uint32(mem[44:]))
-	r.buildID = le.Uint64(mem[48:])
 	if headerSize+r.numSlots*r.slotSize > len(mem) {
 		syscall.Munmap(mem)
 		return nil, fmt.Errorf("%s: truncated", path)
@@ -112,21 +112,18 @@ func (r *region) slot(i int) int { return headerSize + i*r.slotSize }
 
 // Client talks to vecdb. It reconnects transparently when vecdb restarts.
 type Client struct {
-	path    string
-	buildID uint64 // of our own index; results from a vecdb serving another build are meaningless
-	mu      sync.Mutex
-	r       *region
+	path string
+	mu   sync.Mutex
+	r    *region
 }
 
-// NewClient connects to the vecdb at path, which must serve the index with the given build id
-// (row numbers differ between builds, e.g. while a new index is being rolled out).
-func NewClient(path string, buildID uint64) *Client { return &Client{path: path, buildID: buildID} }
+func NewClient(path string) *Client { return &Client{path: path} }
 
 // get returns a live region, (re)opening the file if needed.
 func (c *Client) get() (*region, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.r != nil && c.r.alive() && c.r.buildID == c.buildID {
+	if c.r != nil && c.r.alive() {
 		return c.r, nil
 	}
 	r, err := openRegion(c.path)
@@ -137,14 +134,40 @@ func (c *Client) get() (*region, error) {
 		syscall.Munmap(r.mem)
 		return nil, fmt.Errorf("%w: stale heartbeat", ErrUnavailable)
 	}
-	if r.buildID != c.buildID {
-		syscall.Munmap(r.mem)
-		return nil, fmt.Errorf("%w: vecdb serves index build %x, this server loaded %x (restart the one with the old index)", ErrUnavailable, r.buildID, c.buildID)
-	}
 	// The previous mapping may still be referenced by in-flight requests; it is small, so
 	// it is intentionally leaked rather than unmapped under them.
 	c.r = r
 	return r, nil
+}
+
+// Stats are vecdb's running totals and settings, for the status page.
+type Stats struct {
+	Queries   uint64        // total queries answered since vecdb started
+	Busy      time.Duration // total time spent scanning
+	Started   time.Time
+	BuildID   uint64 // index build being served
+	IndexN    int
+	NProbe    int // clusters scanned per query (0 = exact scan)
+	NList     int // clusters in the index (0 = none)
+	Heartbeat time.Time
+}
+
+// Stats reads the counters vecdb publishes in the shared-memory header.
+func (c *Client) Stats() (Stats, bool) {
+	r, err := c.get()
+	if err != nil {
+		return Stats{}, false
+	}
+	return Stats{
+		Queries:   atomic.LoadUint64(r.u64(56)),
+		Busy:      time.Duration(atomic.LoadUint64(r.u64(64))),
+		Started:   time.UnixMilli(int64(atomic.LoadUint64(r.u64(72)))),
+		BuildID:   atomic.LoadUint64(r.u64(48)),
+		IndexN:    int(atomic.LoadUint32(r.u32(44))),
+		NProbe:    int(atomic.LoadUint32(r.u32(80))),
+		NList:     int(atomic.LoadUint32(r.u32(84))),
+		Heartbeat: time.UnixMilli(int64(atomic.LoadUint64(r.u64(32)))),
+	}, true
 }
 
 // Alive reports whether vecdb is up.
@@ -154,7 +177,9 @@ func (c *Client) Alive() bool {
 }
 
 // Search asks vecdb for the top-k rows by inner product with q, skipping rows in exclude.
-func (c *Client) Search(ctx context.Context, q []float32, k int, exclude []uint32) ([]Hit, error) {
+// buildID is the index build the caller's row numbers refer to; if vecdb is serving another
+// build (one of the two has reloaded a new index and the other not yet), it answers ErrStale.
+func (c *Client) Search(ctx context.Context, buildID uint64, q []float32, k int, exclude []uint32) ([]Hit, error) {
 	r, err := c.get()
 	if err != nil {
 		return nil, err
@@ -177,6 +202,7 @@ func (c *Client) Search(ctx context.Context, q []float32, k int, exclude []uint3
 	le.PutUint32(r.mem[base+4:], opSearch)
 	le.PutUint32(r.mem[base+8:], uint32(k))
 	le.PutUint32(r.mem[base+12:], uint32(len(exclude)))
+	le.PutUint64(r.mem[base+24:], buildID)
 	copy(unsafe.Slice((*float32)(unsafe.Pointer(&r.mem[base+slotHeaderSize])), r.dim), q)
 	offExclude := base + slotHeaderSize + 4*r.dim
 	if len(exclude) > 0 {
@@ -207,7 +233,11 @@ func (c *Client) Search(ctx context.Context, q []float32, k int, exclude []uint3
 		}
 	}
 	atomic.StoreUint32(state, stateFree)
-	if status != statusOK {
+	switch status {
+	case statusOK:
+	case statusStale:
+		return nil, ErrStale
+	default:
 		return nil, ErrBadRequest
 	}
 	return hits, nil

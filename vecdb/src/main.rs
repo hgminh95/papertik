@@ -9,6 +9,7 @@ use index::Index;
 use shm::{Geometry, Region};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -133,11 +134,30 @@ extern "C" fn on_signal(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);
 }
 
-fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, max_exclude: usize, nprobe: usize) -> Result<()> {
-    let index: &'static Index = Box::leak(Box::new(Index::open(index_path)?));
+/// (size, mtime) of the index file, to notice when a new build is renamed into place.
+fn file_stamp(path: &PathBuf) -> Option<(u64, std::time::SystemTime)> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()?))
+}
+
+fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, max_exclude: usize, want_nprobe: usize) -> Result<()> {
+    // On a fresh install the ingest service builds the first index a few minutes after it starts.
+    if !index_path.exists() {
+        eprintln!("vecdb: waiting for {} (the ingest service builds it)", index_path.display());
+        while !index_path.exists() && !STOP.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    }
+    let mut stamp = file_stamp(index_path);
+    let mut index = Arc::new(Index::open(index_path)?);
     let geo = Geometry { num_slots: slots, dim: index.dim, max_k, max_exclude };
     let region: &'static Region = Box::leak(Box::new(Region::create(shm_path, geo, index.n, index.build_id)?));
-    let nprobe = if index.nlist == 0 { 0 } else { nprobe };
+    let effective = |ix: &Index| if ix.nlist == 0 { 0 } else { want_nprobe };
+    let mut nprobe = effective(&index);
+    region.set_search(nprobe, index.nlist);
+    // After a reload the previous build stays loaded for a while, so requests made by a server
+    // that has not switched yet are still answered correctly (each request names its build).
+    let mut previous: Option<(Arc<Index>, usize, Instant)> = None;
     unsafe {
         libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
@@ -154,30 +174,69 @@ fn serve(index_path: &PathBuf, shm_path: &PathBuf, slots: usize, max_k: usize, m
 
     let mut idle: u32 = 0;
     let mut last_beat = Instant::now();
+    let mut last_check = Instant::now();
     let mut stats = Stats::default();
     while !STOP.load(Ordering::Relaxed) {
         // One scan at a time, parallelised across the pool. Whatever queued up while the
         // previous scan ran is answered together by the next one, so under load the batch
         // grows and throughput rises instead of requests competing for cores.
         let mut batch = Vec::new();
+        let mut old_batch = Vec::new();
         let mut found = false;
         for i in 0..slots {
             let slot = region.slot(i);
             if slot.try_take() {
                 found = true;
-                batch.push(slot);
+                match &previous {
+                    Some((old, _, _)) if slot.build_id() == old.build_id && slot.build_id() != index.build_id => {
+                        old_batch.push(slot)
+                    }
+                    _ => batch.push(slot), // current build, or stale (answered as such by handle)
+                }
                 if batch.len() == MAX_BATCH {
-                    stats.scan(index, std::mem::take(&mut batch), nprobe);
+                    stats.scan(&index, region, std::mem::take(&mut batch), nprobe);
                 }
             }
         }
         if !batch.is_empty() {
-            stats.scan(index, batch, nprobe);
+            stats.scan(&index, region, batch, nprobe);
+        }
+        if let (false, Some((old, old_nprobe, _))) = (old_batch.is_empty(), &previous) {
+            stats.scan(old, region, old_batch, *old_nprobe);
         }
         if last_beat.elapsed() >= Duration::from_millis(100) {
             region.heartbeat();
             last_beat = Instant::now();
             stats.maybe_log();
+        }
+        // Hot reload: the ingest service writes a new index and renames it over index.bin.
+        // Requests carry the build id of the index their row numbers refer to, so the Go server
+        // and vecdb can switch at different moments without mixing rows from two builds.
+        if last_check.elapsed() >= Duration::from_secs(2) {
+            last_check = Instant::now();
+            if previous.as_ref().is_some_and(|p| p.2.elapsed() > Duration::from_secs(120)) {
+                previous = None; // unmapped once no scan holds it
+            }
+            let now = file_stamp(index_path);
+            if now.is_some() && now != stamp {
+                match Index::open(index_path) {
+                    Ok(new) if new.dim != index.dim => {
+                        eprintln!("vecdb: new index has dim {} (serving {}); restart vecdb to switch", new.dim, index.dim);
+                        stamp = now;
+                    }
+                    Ok(new) if new.build_id == index.build_id => stamp = now,
+                    Ok(new) => {
+                        eprintln!("vecdb: reloaded {}: {} papers, {} lists (was {} papers)", index_path.display(), new.n, new.nlist, index.n);
+                        let new = Arc::new(new);
+                        previous = Some((std::mem::replace(&mut index, new), nprobe, Instant::now()));
+                        nprobe = effective(&index);
+                        region.set_index(index.n, index.build_id);
+                        region.set_search(nprobe, index.nlist);
+                        stamp = now;
+                    }
+                    Err(e) => eprintln!("vecdb: could not open the new index ({e}); still serving the old one"),
+                }
+            }
         }
         // Adaptive back-off: spin briefly after activity, then sleep progressively longer.
         if found {
@@ -214,12 +273,15 @@ impl Default for Stats {
 }
 
 impl Stats {
-    fn scan(&mut self, index: &Index, batch: Vec<shm::Slot<'_>>, nprobe: usize) {
+    fn scan(&mut self, index: &Index, region: &Region, batch: Vec<shm::Slot<'_>>, nprobe: usize) {
         let t = Instant::now();
-        self.queries += batch.len() as u64;
+        let n = batch.len() as u64;
+        self.queries += n;
         self.scans += 1;
         handle(index, batch, nprobe);
-        self.busy += t.elapsed();
+        let busy = t.elapsed();
+        self.busy += busy;
+        region.add_stats(n, busy.as_nanos() as u64);
     }
 
     fn maybe_log(&mut self) {
@@ -247,7 +309,10 @@ fn handle(index: &Index, slots: Vec<shm::Slot<'_>>, nprobe: usize) {
     let mut valid = Vec::with_capacity(slots.len());
     for slot in slots {
         let k = slot.k();
-        if slot.op() != shm::OP_SEARCH || k == 0 || k > slot.max_k() {
+        if slot.build_id() != index.build_id {
+            // Row numbers (and exclusions) refer to another build; answering would be wrong.
+            slot.complete(shm::STATUS_STALE, &[]);
+        } else if slot.op() != shm::OP_SEARCH || k == 0 || k > slot.max_k() {
             slot.complete(shm::STATUS_BAD_REQUEST, &[]);
         } else {
             valid.push(slot);

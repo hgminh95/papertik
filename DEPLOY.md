@@ -42,7 +42,7 @@ static site is still served from Cloudflare's edge, but API calls cross the Atla
 (~100 ms extra). Hetzner Cloud has US locations, but only shared/dedicated vCPU VMs.
 
 Before committing, rent an hourly Hetzner Cloud VM with the same CPU generation, build the index
-and run `vecdb eval` / `vecdb bench` (section 9) to confirm the numbers for your data.
+and run `vecdb eval` / `vecdb bench` (section 8) to confirm the numbers for your data.
 
 Check Hetzner's current lineup and prices; model names change.
 
@@ -94,60 +94,66 @@ sudo cp -r web/dist /opt/papertok/web/
 sudo chown -R papertok: /opt/papertok
 ```
 
-## 4. Data
+## 4. Data and services
 
-The pipeline is `papers.jsonl` → `embeddings.f32` → `index.bin` (see the README). For the full
-corpus, run the first two steps somewhere else and copy only the results to the server:
-
-1. **Fetch** from the OpenAlex snapshot (the API is too slow for millions of works). The works
-   snapshot is several hundred GB, so use a temporary machine or volume:
-   ```sh
-   aws s3 sync --no-sign-request s3://openalex/data/works ./openalex-works
-   uv run ingest/fetch.py --out papers.jsonl snapshot ./openalex-works
-   ```
-2. **Embed** on a rented GPU for a few hours (SPECTER does roughly 1,000–2,000 papers/s on a
-   current data-centre GPU, so 8.3M papers takes 1–3 hours; the same job on a laptop takes days):
-   ```sh
-   uv run ingest/embed.py --papers papers.jsonl --out embeddings.f32 --batch 128
-   ```
-   `embed.py` resumes where it stopped, so a preempted spot instance is fine.
-3. **Copy and build** on the server:
-   ```sh
-   rsync -P papers.jsonl embeddings.f32 deploy@server:/opt/papertok/data/
-   sudo -u papertok /opt/papertok/bin/vecdb build \
-       --papers /opt/papertok/data/papers.jsonl --embeddings /opt/papertok/data/embeddings.f32 \
-       --out /opt/papertok/data/index.bin
-   ```
-   The build clusters the vectors (k-means, ~4,096 clusters at 8.3M papers) and takes a few
-   minutes on 8 cores. `embeddings.f32` (25 GB) is only needed for rebuilds; keep it off the
-   server or on cheap storage if disk is tight.
-
-## 5. Services
+Papers are ingested by a service you start once and leave running (`papertok-ingest`). It pages
+through every English CS paper on OpenAlex (most cited first), embeds them, rebuilds the index
+every so often and swaps it in. vecdb and the web server notice the new `index.bin` and switch
+to it on their own; nothing needs restarting. Once the backfill is done it keeps checking for
+newly published papers, and it also fetches papers users liked while they weren't indexed yet.
+Progress is on the site's **System status** page (link at the bottom of the sidebar).
 
 ```sh
-sudo cp deploy/papertok-vecdb.service deploy/papertok-server.service /etc/systemd/system/
-sudo tee /etc/papertok.env >/dev/null <<EOF
+# uv for the papertok user (the ingest service runs Python via uv)
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo cp -r ~/papertok/ingest /opt/papertok/
+sudo cp ~/papertok/deploy/papertok-*.service /etc/systemd/system/
+sudo tee /etc/papertok.env >/dev/null <<ENV
 PUBLIC_URL=https://papertok.example.com
 SESSION_KEY=$(openssl rand -hex 32)
 TURNSTILE_SITEKEY=
 TURNSTILE_SECRET=
 OPENALEX_API_KEY=
-EOF
+ENV
 sudo chown root:papertok /etc/papertok.env && sudo chmod 640 /etc/papertok.env
+sudo chown -R papertok: /opt/papertok
 sudo systemctl daemon-reload
-sudo systemctl enable --now papertok-vecdb papertok-server
+sudo systemctl enable --now papertok-ingest papertok-vecdb papertok-server
+```
+
+On a fresh install, vecdb and the server wait until the ingest service has built the first index
+(a few hundred papers; a few minutes including the one-off model download). Follow it with
+`journalctl -u papertok-ingest -f`. Then:
+
+```sh
 curl -s http://127.0.0.1:8080/api/healthz   # {"papers":…,"vecdb":true,…}
 ```
 
-Fill in the Turnstile keys after step 6.4 and `sudo systemctl restart papertok-server`.
+**How long it takes.** On the server's CPU, embedding runs at roughly 7-15 papers/s (bfloat16 is
+measured at startup and used where it is faster), so the full 8.3M corpus takes one to two
+weeks. The most cited papers come first, so the feed is good long before that. The System
+Status page shows the rate and an estimate.
 
-## 6. Cloudflare
+**Optional: skip the wait with a GPU.** Embedding is the slow part. To load the whole corpus in
+an afternoon, run the same service on a rented GPU machine against an empty directory
+(`uv run ingest/daemon.py --data ./data --vecdb path/to/vecdb`; it uses CUDA automatically),
+then stop `papertok-ingest` on the server, copy `papers.jsonl`, `embeddings.f32`,
+`ingest-state.json` and `index.bin` into `/opt/papertok/data/`, `chown` them to `papertok`, and
+start `papertok-ingest` again. It carries on from there.
 
-### 6.1 Domain
+**Already have `papers.jsonl` + `embeddings.f32`** from an earlier manual run? Put them in
+`/opt/papertok/data/` before the first start: the service keeps them (rows stay aligned), skips
+papers it already has, and continues.
+
+Fill in the Turnstile keys after step 5.4 and `sudo systemctl restart papertok-server`.
+
+## 5. Cloudflare
+
+### 5.1 Domain
 Add the domain to Cloudflare and switch its nameservers at your registrar. Under
 **SSL/TLS → Edge Certificates**, enable *Always Use HTTPS* and set the minimum TLS version to 1.2.
 
-### 6.2 Tunnel
+### 5.2 Tunnel
 The tunnel carries all traffic, so the server never accepts connections from the internet.
 
 In the dashboard: **Zero Trust → Networks → Tunnels → Create a tunnel** (type *Cloudflared*),
@@ -167,7 +173,7 @@ Then add a **public hostname**: `papertok.example.com` → service `http://127.0
 The Go server trusts `CF-Connecting-IP` only when the TCP peer is loopback, which is exactly
 the tunnel. Per-IP rate limiting (5 req/s, burst 20 on `/api/*`) therefore sees real visitor IPs.
 
-### 6.3 Bot protection and rate limits
+### 5.3 Bot protection and rate limits
 - **Security → Bots**: turn on *Bot Fight Mode* (or *Super Bot Fight Mode* on paid plans).
   Verified crawlers such as Googlebot are not blocked, which matters for SEO.
 - **Security → WAF → Rate limiting rules**: one rule for `URI Path starts with /api/`, counted
@@ -175,14 +181,14 @@ the tunnel. Per-IP rate limiting (5 req/s, burst 20 on `/api/*`) therefore sees 
   with a short period; paid plans allow longer windows.
 - **Security → WAF → Managed rules**: enable the Cloudflare managed ruleset if your plan has it.
 
-### 6.4 Turnstile
+### 5.4 Turnstile
 **Turnstile → Add widget**: hostname `papertok.example.com`, mode *Managed* (or *Invisible*).
 Put the site key and secret into `/etc/papertok.env` and restart the server. The app runs the
 challenge once per visitor, exchanges it for a signed 24-hour cookie, and `/api/*` data
 endpoints reject requests without it. Crawlers never need it: paper pages (`/p/…`), the sitemap
 and static files are rendered without the API.
 
-### 6.5 Caching
+### 5.5 Caching
 Cloudflare caches static files by extension, but not HTML. Add **Caching → Cache Rules**:
 
 | Rule | Match | Setting |
@@ -193,7 +199,7 @@ Cloudflare caches static files by extension, but not HTML. Add **Caching → Cac
 
 With these, crawler traffic on paper pages mostly stops at the edge.
 
-## 7. Search engines
+## 6. Search engines
 
 1. **Google Search Console** → add a *Domain* property (verify with a DNS TXT record in
    Cloudflare) → **Sitemaps** → submit `https://papertok.example.com/sitemap.xml`.
@@ -205,9 +211,13 @@ With these, crawler traffic on paper pages mostly stops at the edge.
 `PUBLIC_URL` must be set, or canonical links and the sitemap will use whatever host the request
 came in on.
 
-## 8. Operations
+## 7. Operations
 
-**Logs.** `journalctl -u papertok-server -f` and `journalctl -u papertok-vecdb -f`. While there is
+**Status page.** `https://papertok.example.com/#/status` (also linked at the bottom of the
+sidebar): requests/s, feed latency, papers indexed, the ingest queue and backfill progress,
+vecdb load. It is public, like the rest of the site.
+
+**Logs.** `journalctl -u papertok-server -f`, `-u papertok-vecdb` and `-u papertok-ingest`. While there is
 traffic, vecdb logs a line every 10 s:
 `vecdb: 212.4 queries/s, avg batch 6.1, avg scan 18.2 ms, busy 64%`.
 Sustained `busy` near 100% means the CPU is saturated (see tuning below).
@@ -224,27 +234,31 @@ keeps working with a random feed.
 cd ~/papertok && git pull && make build test
 sudo cp vecdb/target/release/vecdb server/bin/server /opt/papertok/bin/
 sudo rsync -a --delete web/dist/ /opt/papertok/web/dist/
-sudo systemctl restart papertok-vecdb papertok-server
+sudo rsync -a --delete ingest/ /opt/papertok/ingest/
+sudo systemctl restart papertok-vecdb papertok-server papertok-ingest
 ```
 Static files are hashed, so a new frontend is live immediately; old tabs keep working.
 
-**Updating the index** (new papers, including the ones users liked while unindexed):
+**Updating the index** happens by itself: `papertok-ingest` rebuilds it when there are enough new
+papers (or every 6 hours if anything is new) and renames the new file over `index.bin`. vecdb
+and the server switch within a few seconds; vecdb keeps the previous build loaded for two
+minutes so requests in flight are still answered. Useful commands:
+
 ```sh
-cd /opt/papertok/data
-sudo -u papertok uv run ~/papertok/ingest/fetch.py --out papers.jsonl pending pending.jsonl   # appends
-# embed the new lines (resumes after the rows already in embeddings.f32), then:
-sudo -u papertok /opt/papertok/bin/vecdb build --papers papers.jsonl --embeddings embeddings.f32 --out index.new.bin
-sudo -u papertok mv index.new.bin index.bin
-sudo systemctl restart papertok-vecdb papertok-server
+journalctl -u papertok-ingest -f                  # what it is doing
+cat /opt/papertok/data/ingest-status.json          # the numbers the status page shows
+sudo systemctl restart papertok-ingest             # safe at any time; it resumes
 ```
-Every build gets a new id; the server only uses a vecdb that loaded the same build, so between
-the two restarts the site briefly serves random feeds instead of mismatched results.
-`papers.jsonl` is only ever appended to, so it is safe to replace the index underneath it.
 
-**Backups.** Everything in `data/` can be rebuilt from OpenAlex. Back up `/etc/papertok.env`
-and `data/pending.jsonl` (the list of papers users asked for). User data lives in browsers only.
+The service's settings (queue size, rebuild interval, how often to check for new papers) are
+flags of `ingest/daemon.py`; see `--help`.
 
-## 9. Sizing and tuning search
+**Backups.** Everything in `data/` can be rebuilt from OpenAlex, but re-embedding takes days on
+a CPU, so keep a copy of `papers.jsonl` + `embeddings.f32` + `ingest-state.json` somewhere
+cheap (e.g. a Hetzner Storage Box). Also back up `/etc/papertok.env` and `data/pending.jsonl`.
+User data lives in browsers only.
+
+## 8. Sizing and tuning search
 
 `vecdb serve --nprobe N` sets how many of the index's clusters each query scans. It is the
 speed/quality knob:
@@ -269,7 +283,7 @@ query, so it is bound by CPU rather than memory bandwidth. Only the exact scan
 (`--nprobe 0`) streams the whole 6.6 GB per batch; dual-channel DDR5 (~60 GB/s in practice)
 caps that at roughly 10 scans/s, i.e. ~150 queries/s with batching.
 
-## 10. Security checklist
+## 9. Security checklist
 
 - [ ] Only SSH is reachable (`ufw status`, `ss -tlnp` shows the server on 127.0.0.1 only).
 - [ ] `/etc/papertok.env` is `640 root:papertok`; `SESSION_KEY` is random.

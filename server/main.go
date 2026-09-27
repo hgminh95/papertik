@@ -18,7 +18,6 @@ import (
 
 	"papertok/server/internal/feed"
 	"papertok/server/internal/shm"
-	"papertok/server/internal/store"
 	"papertok/server/internal/web"
 )
 
@@ -39,12 +38,6 @@ func main() {
 	pending := flag.String("pending", "", "log of papers to ingest later (default: pending.jsonl next to -papers)")
 	flag.Parse()
 
-	st, err := store.Open(*index, *papers)
-	if err != nil {
-		log.Fatalf("open store: %v", err)
-	}
-	log.Printf("loaded %d papers (dim %d)", st.N, st.Dim)
-
 	sessionKey, err := hex.DecodeString(os.Getenv("SESSION_KEY"))
 	if err != nil || len(sessionKey) < 16 {
 		sessionKey = make([]byte, 32)
@@ -64,6 +57,7 @@ func main() {
 		OpenAlexMailto:   os.Getenv("OPENALEX_MAILTO"),
 		OpenAlexAPIKey:   os.Getenv("OPENALEX_API_KEY"),
 		PendingPath:      *pending,
+		IndexPath:        *index,
 		PapersPath:       *papers,
 		PublicURL:        os.Getenv("PUBLIC_URL"),
 	}
@@ -71,15 +65,26 @@ func main() {
 		log.Printf("TURNSTILE_SECRET unset: bot verification disabled")
 	}
 
-	db := shm.NewClient(*shmPath, st.BuildID)
+	db := shm.NewClient(*shmPath)
 	if !db.Alive() {
 		log.Printf("vecdb not reachable at %s yet; serving random feed until it is", *shmPath)
 	}
-	rec := feed.New(feed.DefaultConfig, st, db)
-	app, err := web.New(cfg, st, db, rec)
+	// On a fresh install the ingest service builds the first index a few minutes after it starts.
+	for waited := false; ; waited = true {
+		if _, err := os.Stat(*index); err == nil {
+			break
+		}
+		if !waited {
+			log.Printf("waiting for %s (the ingest service builds it)", *index)
+		}
+		time.Sleep(5 * time.Second)
+	}
+	rec := feed.New(feed.DefaultConfig, db)
+	app, err := web.New(cfg, db, rec)
 	if err != nil {
 		log.Fatalf("init: %v", err)
 	}
+	log.Printf("loaded %d papers (dim %d)", app.Store().N, app.Store().Dim)
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           app.Handler(),

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"log"
 	"net/http"
+	"papertok/server/internal/store"
 	"strconv"
 	"sync"
 )
@@ -22,7 +23,7 @@ type rowOut struct {
 var bufPool = sync.Pool{New: func() any { b := make([]byte, 0, 64<<10); return &b }}
 
 // writePapers writes {"papers":[...]<extra>} where extra is a raw JSON fragment such as `,"more":true`.
-func (s *Server) writePapers(w http.ResponseWriter, rows []rowOut, extra string) {
+func (s *Server) writePapers(w http.ResponseWriter, st *store.Store, rows []rowOut, extra string) {
 	bp := bufPool.Get().(*[]byte)
 	buf := append((*bp)[:0], `{"papers":[`...)
 	first := true
@@ -33,14 +34,14 @@ func (s *Server) writePapers(w http.ResponseWriter, rows []rowOut, extra string)
 		}
 		var err error
 		start := len(buf)
-		buf, err = s.store.Raw(buf, it.row)
+		buf, err = st.Raw(buf, it.row)
 		if err != nil || len(buf) == start || buf[len(buf)-1] != '}' {
 			log.Printf("papers.jsonl row %d: unreadable (%v)", it.row, err)
 			buf = buf[:mark]
 			continue
 		}
 		buf = buf[:len(buf)-1] // reopen the object
-		scale, q := s.store.Vector(it.row)
+		scale, q := st.Vector(it.row)
 		buf = append(buf, `,"vec":"`...)
 		buf = base64.StdEncoding.AppendEncode(buf, int8Bytes(q))
 		buf = append(buf, `","scale":`...)

@@ -2,6 +2,7 @@ package shm_test
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"os/exec"
@@ -40,7 +41,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := shm.NewClient(shmPath, st.BuildID)
+	c := shm.NewClient(shmPath)
 	for i := 0; !c.Alive(); i++ {
 		if i > 100 {
 			t.Fatal("vecdb did not come up")
@@ -56,7 +57,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	hits, err := c.Search(ctx, q, 10, nil)
+	hits, err := c.Search(ctx, st.BuildID, q, 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,12 +69,12 @@ func TestSearchAgainstVecdb(t *testing.T) {
 			t.Fatalf("not sorted: %+v", hits)
 		}
 	}
-	hits, err = c.Search(ctx, q, 10, []uint32{42})
+	hits, err = c.Search(ctx, st.BuildID, q, 10, []uint32{42})
 	if err != nil || hits[0].Row == 42 {
 		t.Fatalf("exclude ignored: %v %+v", err, hits)
 	}
 	// k is clamped to the server's max_k.
-	if hits, _ = c.Search(ctx, q, 1000, nil); len(hits) != 32 {
+	if hits, _ = c.Search(ctx, st.BuildID, q, 1000, nil); len(hits) != 32 {
 		t.Fatalf("want 32 hits (max_k), got %d", len(hits))
 	}
 
@@ -89,7 +90,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 			for i, x := range q8 {
 				q[i] = float32(x) * scale
 			}
-			hits, err := c.Search(ctx, q, 5, nil)
+			hits, err := c.Search(ctx, st.BuildID, q, 5, nil)
 			if err == nil && hits[0].Row != uint32(g) {
 				err = os.ErrInvalid
 			}
@@ -104,9 +105,10 @@ func TestSearchAgainstVecdb(t *testing.T) {
 		}
 	}
 
-	// A client that loaded a different build of the index must not use this vecdb.
-	if other := shm.NewClient(shmPath, st.BuildID+1); other.Alive() {
-		t.Fatal("client with a different index build accepted vecdb")
+	// A request made against a different build of the index is refused, not answered with
+	// row numbers that mean something else.
+	if _, err := c.Search(ctx, st.BuildID+1, q, 5, nil); !errors.Is(err, shm.ErrStale) {
+		t.Fatalf("request for another index build: got %v, want ErrStale", err)
 	}
 
 	// Stopping vecdb is noticed immediately.
@@ -115,7 +117,7 @@ func TestSearchAgainstVecdb(t *testing.T) {
 	if c.Alive() {
 		t.Fatal("client still thinks vecdb is alive")
 	}
-	if _, err := c.Search(ctx, q, 5, nil); err == nil {
+	if _, err := c.Search(ctx, st.BuildID, q, 5, nil); err == nil {
 		t.Fatal("search succeeded with vecdb down")
 	}
 }

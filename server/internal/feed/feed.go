@@ -7,6 +7,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"sort"
+	"sync/atomic"
+	"time"
 
 	"papertok/server/internal/shm"
 	"papertok/server/internal/store"
@@ -27,29 +29,41 @@ type Item struct {
 }
 
 type Recommender struct {
-	cfg   Config
-	store *store.Store
-	db    *shm.Client
+	cfg        Config
+	db         *shm.Client
+	lastLogged atomic.Int64 // unix seconds of the last fallback log line
+	fallbacks  atomic.Int64 // since then
 }
 
-func New(cfg Config, s *store.Store, db *shm.Client) *Recommender {
-	return &Recommender{cfg: cfg, store: s, db: db}
+// logFallback logs vecdb failures at most every 10 s (with a count), not once per request.
+func (r *Recommender) logFallback(err error) {
+	n := r.fallbacks.Add(1)
+	now := time.Now().Unix()
+	if last := r.lastLogged.Load(); now-last >= 10 && r.lastLogged.CompareAndSwap(last, now) {
+		r.fallbacks.Store(0)
+		log.Printf("feed: vecdb search failed, serving random papers (%d requests): %v", n, err)
+	}
+}
+
+func New(cfg Config, db *shm.Client) *Recommender {
+	return &Recommender{cfg: cfg, db: db}
 }
 
 // Next returns up to k papers for a user with taste vector pref (nil = no likes yet),
 // never returning rows in seen.
-func (r *Recommender) Next(ctx context.Context, pref []float32, seen []uint32, k int) []Item {
+// st is the index the caller's row numbers (seen) refer to; vecdb must be serving the same build.
+func (r *Recommender) Next(ctx context.Context, st *store.Store, pref []float32, seen []uint32, k int) []Item {
 	seenSet := make(map[uint32]struct{}, len(seen))
 	for _, s := range seen {
 		seenSet[s] = struct{}{}
 	}
 	if pref == nil {
-		return r.random(k, seenSet, "random")
+		return r.random(st, k, seenSet, "random")
 	}
-	hits, err := r.db.Search(ctx, pref, max(r.cfg.Candidates, k), seen)
+	hits, err := r.db.Search(ctx, st.BuildID, pref, max(r.cfg.Candidates, k), seen)
 	if err != nil {
-		log.Printf("feed: vecdb search failed, serving random: %v", err)
-		return r.random(k, seenSet, "random")
+		r.logFallback(err)
+		return r.random(st, k, seenSet, "random")
 	}
 
 	picked := sample(hits, k, r.cfg.Temperature)
@@ -60,7 +74,7 @@ func (r *Recommender) Next(ctx context.Context, pref []float32, seen []uint32, k
 	}
 	for _, h := range picked {
 		if rand.Float64() < r.cfg.Explore {
-			if ex := r.random(1, union(seenSet, taken), "explore"); len(ex) == 1 {
+			if ex := r.random(st, 1, union(seenSet, taken), "explore"); len(ex) == 1 {
 				taken[ex[0].Row] = struct{}{}
 				out = append(out, ex[0])
 				continue
@@ -70,16 +84,16 @@ func (r *Recommender) Next(ctx context.Context, pref []float32, seen []uint32, k
 	}
 	// Candidates exhausted (tiny corpus or huge seen list): top up with random papers.
 	if len(out) < k {
-		out = append(out, r.random(k-len(out), union(seenSet, taken), "random")...)
+		out = append(out, r.random(st, k-len(out), union(seenSet, taken), "random")...)
 	}
 	return out
 }
 
 // Top returns the k nearest papers to pref, best first, without sampling or exploration.
-func (r *Recommender) Top(ctx context.Context, pref []float32, seen []uint32, k int) []Item {
-	hits, err := r.db.Search(ctx, pref, k, seen)
+func (r *Recommender) Top(ctx context.Context, st *store.Store, pref []float32, seen []uint32, k int) []Item {
+	hits, err := r.db.Search(ctx, st.BuildID, pref, k, seen)
 	if err != nil {
-		log.Printf("feed: vecdb search failed: %v", err)
+		r.logFallback(err)
 		return nil
 	}
 	out := make([]Item, len(hits))
@@ -117,8 +131,8 @@ func sample(hits []shm.Hit, k int, temp float64) []shm.Hit {
 	return out
 }
 
-func (r *Recommender) random(k int, skip map[uint32]struct{}, reason string) []Item {
-	n := r.store.N
+func (r *Recommender) random(st *store.Store, k int, skip map[uint32]struct{}, reason string) []Item {
+	n := st.N
 	out := make([]Item, 0, k)
 	chosen := make(map[uint32]struct{}, k)
 	for tries := 0; len(out) < k && tries < 20*k+100; tries++ {

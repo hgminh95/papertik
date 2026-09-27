@@ -121,6 +121,12 @@ func (s *Store) Row(id string) (uint32, bool) {
 	return r, ok
 }
 
+// Close unmaps the index and metadata. Only call it once no request can still be using the store.
+func (s *Store) Close() {
+	syscall.Munmap(s.mem)
+	syscall.Munmap(s.papers)
+}
+
 // ID returns the numeric OpenAlex id of a row (W123 -> 123).
 func (s *Store) ID(row uint32) uint64 { return s.ids[row] }
 

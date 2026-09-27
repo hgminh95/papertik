@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=papertok
 WorkingDirectory=/opt/papertok
-# --nprobe: IVF clusters scanned per query (speed/recall trade-off; see DEPLOY.md section 9)
+# --nprobe: IVF clusters scanned per query (speed/recall trade-off; see DEPLOY.md section 8)
 ExecStart=/opt/papertok/bin/vecdb serve --index data/index.bin --shm /dev/shm/papertok --nprobe 48
 Restart=always
 RestartSec=1

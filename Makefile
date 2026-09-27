@@ -1,7 +1,7 @@
 CARGO ?= $(shell command -v cargo || echo $(HOME)/.cargo/bin/cargo)
 DATA ?= data
 
-.PHONY: all build vecdb server web synth index run-vecdb run-server dev test clean
+.PHONY: all build vecdb server web synth index ingest run-vecdb run-server dev test clean
 
 all: build
 
@@ -20,11 +20,10 @@ web:
 synth: vecdb
 	./vecdb/target/release/vecdb synth --n 100000 --out $(DATA)
 
-# Real data: fetch + embed (see ingest/), then build the index.
-fetch:
-	uv run ingest/fetch.py --out $(DATA)/papers.jsonl --max 20000 api --sort cited_by_count:desc
-embed:
-	uv run ingest/embed.py --papers $(DATA)/papers.jsonl --out $(DATA)/embeddings.f32
+# Real data: the ingest service fetches, embeds and (re)builds the index, forever.
+# Leave it running; vecdb and the server pick up each new index by themselves.
+ingest: vecdb
+	uv run ingest/daemon.py --data $(DATA) --vecdb ./vecdb/target/release/vecdb
 
 index: vecdb
 	./vecdb/target/release/vecdb build --papers $(DATA)/papers.jsonl --embeddings $(DATA)/embeddings.f32 --out $(DATA)/index.bin

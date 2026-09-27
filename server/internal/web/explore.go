@@ -154,29 +154,32 @@ func (e *explorer) build(papersPath string, rowOf func(id string) (uint32, bool)
 
 // GET /api/explore: the field list for the chips.
 func (s *Server) handleExplore(w http.ResponseWriter, r *http.Request) {
-	s.explore.mu.RLock()
-	defer s.explore.mu.RUnlock()
-	writeJSON(w, map[string]any{"ready": s.explore.ready, "fields": s.explore.fields})
+	sn := s.snap()
+	sn.explore.mu.RLock()
+	defer sn.explore.mu.RUnlock()
+	writeJSON(w, map[string]any{"ready": sn.explore.ready, "fields": sn.explore.fields})
 }
 
 // GET /api/explore/papers?field=&sort=cited|recent&page=
 func (s *Server) handleExplorePapers(w http.ResponseWriter, r *http.Request) {
+	sn := s.snap()
+	st := sn.st
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
 	page = max(page, 1)
-	s.explore.mu.RLock()
-	lists := s.explore.cited
+	sn.explore.mu.RLock()
+	lists := sn.explore.cited
 	if q.Get("sort") == "recent" {
-		lists = s.explore.recent
+		lists = sn.explore.recent
 	}
 	rows := lists[q.Get("field")]
-	ready := s.explore.ready
-	s.explore.mu.RUnlock()
+	ready := sn.explore.ready
+	sn.explore.mu.RUnlock()
 
 	lo, hi := min((page-1)*explorePerPage, len(rows)), min(page*explorePerPage, len(rows))
 	out := make([]rowOut, 0, hi-lo)
 	for _, row := range rows[lo:hi] {
 		out = append(out, rowOut{row: row, reason: "random"})
 	}
-	s.writePapers(w, out, fmt.Sprintf(`,"ready":%t,"more":%t`, ready, hi < len(rows)))
+	s.writePapers(w, st, out, fmt.Sprintf(`,"ready":%t,"more":%t`, ready, hi < len(rows)))
 }

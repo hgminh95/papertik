@@ -1,0 +1,25 @@
+[Unit]
+Description=PaperTok ingest: fetch CS papers from OpenAlex, embed them, rebuild the index (forever)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=papertok
+WorkingDirectory=/opt/papertok
+# OPENALEX_API_KEY (optional) is read from here.
+EnvironmentFile=-/etc/papertok.env
+Environment=HOME=/opt/papertok HF_HOME=/opt/papertok/.cache/huggingface UV_CACHE_DIR=/opt/papertok/.cache/uv
+# The CPU build of PyTorch (the default wheel bundles ~3 GB of CUDA libraries this server can't use).
+ExecStart=/usr/local/bin/uv run --extra-index-url https://download.pytorch.org/whl/cpu \
+    /opt/papertok/ingest/daemon.py --data /opt/papertok/data --vecdb /opt/papertok/bin/vecdb
+# Serving always wins: embedding only gets the CPU and disk the site isn't using.
+Nice=10
+CPUWeight=20
+IOWeight=20
+Restart=always
+RestartSec=30
+# Stops after the current batch (up to a minute on a CPU).
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -4,12 +4,13 @@
   import Personal from './lib/Personal.svelte'
   import PaperView from './lib/PaperView.svelte'
   import Search from './lib/Search.svelte'
+  import Status from './lib/Status.svelte'
   import { user } from './lib/user.svelte'
   import { toast } from './lib/toast.svelte'
   import { syncPendingLikes } from './lib/actions'
   import { onMount } from 'svelte'
 
-  type Tab = 'foryou' | 'discover' | 'personal'
+  type Tab = 'foryou' | 'discover' | 'personal' | 'status'
   // Order and icons follow TikTok: For You (home), Explore (compass), Profile (person).
   const TABS: { id: Tab; label: string; hash: string; icon: string }[] = [
     { id: 'foryou', label: 'For You', hash: '#/', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z' },
@@ -36,6 +37,7 @@
     const h = location.hash
     if (h.startsWith('#/discover')) return 'discover'
     if (h.startsWith('#/me')) return 'personal'
+    if (h.startsWith('#/status')) return 'status'
     return 'foryou'
   }
   const paperFromHash = () => /^#\/p\/(W\d+)/i.exec(location.hash)?.[1]?.toUpperCase() ?? null
@@ -67,10 +69,12 @@
   function select(t: Tab) {
     paperId = null
     searching = false
-    if (t === tab && location.hash === TABS.find((x) => x.id === t)!.hash) return
+    if (t === tab && location.hash === hashOf(t)) return
     show(t)
-    history.pushState(null, '', TABS.find((x) => x.id === t)!.hash)
+    history.pushState(null, '', hashOf(t))
   }
+
+  const hashOf = (t: Tab) => (t === 'status' ? '#/status' : TABS.find((x) => x.id === t)!.hash)
 
   function openSearch() {
     paperId = null
@@ -86,7 +90,7 @@
       history.back()
     } else {
       searching = false
-      history.replaceState(null, '', TABS.find((x) => x.id === tab)!.hash)
+      history.replaceState(null, '', hashOf(tab))
     }
   }
 
@@ -140,6 +144,16 @@
     <p class="status">
       {user.likes === 0 ? 'Like papers to tune your feed.' : `Feed tuned by ${user.likes} like${user.likes === 1 ? '' : 's'}.`}
     </p>
+    <a
+      class="statuslink"
+      class:active={tab === 'status' && !paperId && !searching}
+      href="#/status"
+      onclick={(e) => (e.preventDefault(), select('status'))}
+      aria-label="System status"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
+      <span class="label">System status</span>
+    </a>
     <a class="github" href="https://github.com/hgminh95/papertok" target="_blank" rel="noopener noreferrer" aria-label="PaperTok on GitHub">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.6.3-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2z" /></svg>
       <span class="label">Open source on GitHub</span>
@@ -160,8 +174,11 @@
     {/if}
     {#if tab === 'personal'}
       <div class="view">
-        <Personal onchanged={() => forYou.restart()} onopen={openPaper} />
+        <Personal onchanged={() => forYou.restart()} onopen={openPaper} onstatus={() => select('status')} />
       </div>
+    {/if}
+    {#if tab === 'status'}
+      <div class="view"><Status /></div>
     {/if}
     {#if searching}
       <div class="layer">
@@ -289,8 +306,32 @@
     line-height: 1.4;
     color: var(--muted);
   }
-  .github {
+  .statuslink {
     margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    text-decoration: none;
+  }
+  .statuslink:hover,
+  .statuslink.active {
+    color: var(--fg);
+  }
+  .statuslink svg {
+    width: 20px;
+    height: 20px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .github {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -391,6 +432,7 @@
     .wordmark,
     .status,
     .search .label,
+    .statuslink .label,
     .github .label {
       display: none;
     }
@@ -430,6 +472,7 @@
     }
     .brand,
     .search,
+    .statuslink,
     .github {
       display: none;
     }

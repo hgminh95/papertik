@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"papertok/server/internal/store"
 	"strings"
 	"time"
 )
@@ -19,6 +20,7 @@ import (
 // seed is approximated by averaging the vectors of their OpenAlex related and referenced
 // works that are in the index, and the paper is queued for ingestion.
 func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	id := strings.ToUpper(r.PathValue("id"))
 	if !workID.MatchString(id) {
 		httpError(w, http.StatusBadRequest, "bad paper id")
@@ -30,16 +32,16 @@ func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
 		SeedBasis int       `json:"seedBasis"`      // 0 = exact (own vector), n = averaged from n related papers
 	}
 
-	if row, ok := s.store.Row(id); ok {
-		p, err := s.store.Paper(row)
+	if row, ok := st.Row(id); ok {
+		p, err := st.Paper(row)
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, "could not read paper")
 			return
 		}
-		vec, scale := s.vector(row)
+		vec, scale := s.vector(st, row)
 		writeJSON(w, response{
 			Paper: feedPaper{Paper: p, Vec: vec, Scale: scale, Reason: "shared", Indexed: true},
-			Seed:  encodeF32(s.dequantize(row)),
+			Seed:  encodeF32(s.dequantize(st, row)),
 		})
 		return
 	}
@@ -56,11 +58,11 @@ func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
 	res := response{Paper: feedPaper{Paper: work.paper(), Reason: "shared"}}
 	var sum []float32
 	for _, rel := range append(work.RelatedWorks, work.ReferencedWorks...) {
-		row, ok := s.store.Row(rel)
+		row, ok := st.Row(rel)
 		if !ok {
 			continue
 		}
-		v := s.dequantize(row)
+		v := s.dequantize(st, row)
 		if sum == nil {
 			sum = make([]float32, len(v))
 		}
@@ -77,6 +79,7 @@ func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/pending {id, reason}: the client liked or bookmarked a paper we cannot embed yet.
 func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	var req struct {
 		ID     string `json:"id"`
 		Reason string `json:"reason"`
@@ -94,7 +97,7 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 	if reason != "like" && reason != "bookmark" {
 		reason = "other"
 	}
-	_, indexed := s.store.Row(id)
+	_, indexed := st.Row(id)
 	queued := !indexed && s.pending.add(id, reason)
 	writeJSON(w, map[string]bool{"indexed": indexed, "queued": queued})
 }
@@ -102,6 +105,7 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 // POST /api/vectors {ids}: vectors for the given ids that are indexed now. Lets the client
 // apply likes it made while a paper was still pending.
 func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	var req struct {
 		IDs []string `json:"ids"`
 	}
@@ -111,15 +115,15 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []rowOut
 	for _, id := range req.IDs {
-		if row, ok := s.store.Row(id); ok {
+		if row, ok := st.Row(id); ok {
 			out = append(out, rowOut{row: row, reason: "shared"})
 		}
 	}
-	s.writePapers(w, out, "")
+	s.writePapers(w, st, out, "")
 }
 
-func (s *Server) dequantize(row uint32) []float32 {
-	scale, q := s.store.Vector(row)
+func (s *Server) dequantize(st *store.Store, row uint32) []float32 {
+	scale, q := st.Vector(row)
 	v := make([]float32, len(q))
 	for i, x := range q {
 		v[i] = float32(x) * scale

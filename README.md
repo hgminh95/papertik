@@ -12,6 +12,8 @@ learns. Design notes are in [PLAN.md](PLAN.md).
 - **Search**: its own screen (sidebar search box, or the magnifier on phones) with recent
   searches and suggestions; results from OpenAlex sorted by relevance, citations or date. When
   OpenAlex rate-limits anonymous search, small indexes fall back to a local title search.
+- **System status** (link at the bottom of the sidebar): request rates and latency, papers
+  indexed, the ingest queue and backfill progress, vecdb load.
 - **Personal**: your taste vector as a heatmap, the papers closest to it, fields you liked,
   liked and recently seen papers, plus export / import / clear of everything stored in the browser.
 
@@ -38,21 +40,21 @@ For UI work, `make dev` serves the SPA with hot reload on :5173 and proxies `/ap
 
 ## Real papers
 
+One command, left running:
+
 ```sh
-# 1. Fetch CS papers from OpenAlex (API; resumable). For *all* CS papers use the snapshot:
-#    aws s3 sync --no-sign-request s3://openalex/data/works ./openalex-works
-#    uv run ingest/fetch.py snapshot ./openalex-works
-uv run ingest/fetch.py --max 20000 api --sort cited_by_count:desc
-
-# 2. Embed with allenai/specter (resumable; GPU strongly recommended beyond ~100k papers)
-uv run ingest/embed.py
-
-# 3. Quantise into the index and restart vecdb
-make index
+make ingest        # = uv run ingest/daemon.py --data data --vecdb ./vecdb/target/release/vecdb
 ```
 
-`vecdb build` only indexes rows that have embeddings, so you can build while `embed.py` is
-still running. vecdb and the server must be restarted to pick up a new index.
+It pages through every English CS paper on OpenAlex (most cited first), embeds them with
+`allenai/specter`, and rebuilds `data/index.bin` whenever enough is new. vecdb and the server
+reload the new index by themselves, so start them once (`make run-vecdb`, `make run-server`;
+they wait for the first index) and watch the index grow on the **System status** page. After the
+backfill it keeps checking for new papers, and picks up papers users liked before they were
+indexed. Stop and restart it at any time; it resumes.
+
+`ingest/fetch.py` and `ingest/embed.py` still work on their own for one-off jobs (e.g. embedding
+on a GPU machine).
 
 ## How a request flows
 

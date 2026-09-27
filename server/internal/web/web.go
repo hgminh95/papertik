@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -29,38 +30,120 @@ type Config struct {
 	OpenAlexMailto   string // optional, for the OpenAlex polite pool
 	OpenAlexAPIKey   string // optional, raises OpenAlex rate limits
 	PendingPath      string // where to log papers to ingest later (empty = don't log)
-	PapersPath       string // papers.jsonl, scanned once in the background for the Discover lists
+	IndexPath        string // index.bin; watched, and reloaded when a new build replaces it
+	PapersPath       string // papers.jsonl (append-only; the index points into it)
 	PublicURL        string // e.g. https://papertok.example.com, for canonical links and sitemaps (default: from the request)
 }
 
 type Server struct {
 	cfg      Config
-	store    *store.Store
+	cur      atomic.Pointer[snapshot]
 	db       *shm.Client
 	rec      *feed.Recommender
 	sessions sessions
 	search   *searcher
-	titles   titleIndex // built on first local search
 	pending  *pendingLog
-	explore  explorer
 	index    indexHTML
+	metrics  metrics
+	vecStats vecdbSampler
 }
 
-func New(cfg Config, s *store.Store, db *shm.Client, rec *feed.Recommender) (*Server, error) {
+// snapshot is everything derived from one build of the index. Requests take one snapshot at
+// the start and use it throughout, so a reload in the middle of a request cannot mix row
+// numbers from two builds.
+type snapshot struct {
+	st      *store.Store
+	explore *explorer
+	titles  *titleIndex // built on first local search
+	stamp   fileStamp
+}
+
+func (s *Server) snap() *snapshot { return s.cur.Load() }
+
+// Store returns the index currently being served.
+func (s *Server) Store() *store.Store { return s.snap().st }
+
+func New(cfg Config, db *shm.Client, rec *feed.Recommender) (*Server, error) {
 	pending, err := openPending(cfg.PendingPath)
 	if err != nil {
 		return nil, err
 	}
 	srv := &Server{
-		cfg: cfg, store: s, db: db, rec: rec,
+		cfg: cfg, db: db, rec: rec,
 		sessions: sessions{key: cfg.SessionKey},
 		search:   newSearcher(cfg.OpenAlexMailto, cfg.OpenAlexAPIKey),
 		pending:  pending,
 	}
-	if cfg.PapersPath != "" {
-		go srv.explore.build(cfg.PapersPath, s.Row)
+	sn, err := srv.load()
+	if err != nil {
+		return nil, err
 	}
+	srv.cur.Store(sn)
+	go sn.explore.build(cfg.PapersPath, sn.st.Row) // serve right away; Discover waits for it
+	srv.metrics.started = time.Now()
+	go srv.watch()
+	go srv.sampleVecdb()
 	return srv, nil
+}
+
+type fileStamp struct {
+	size  int64
+	mtime time.Time
+}
+
+func stampOf(path string) (fileStamp, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, err
+	}
+	return fileStamp{fi.Size(), fi.ModTime()}, nil
+}
+
+func (s *Server) load() (*snapshot, error) {
+	stamp, err := stampOf(s.cfg.IndexPath)
+	if err != nil {
+		return nil, err
+	}
+	st, err := store.Open(s.cfg.IndexPath, s.cfg.PapersPath)
+	if err != nil {
+		return nil, err
+	}
+	return &snapshot{st: st, explore: &explorer{}, titles: &titleIndex{}, stamp: stamp}, nil
+}
+
+// watch reloads the index when a new build replaces index.bin (the ingest service writes a
+// new file and renames it into place). The new snapshot is fully prepared, Discover lists
+// included, before it is swapped in; the old one is unmapped once in-flight requests are done.
+func (s *Server) watch() {
+	for range time.Tick(5 * time.Second) {
+		old := s.snap()
+		stamp, err := stampOf(s.cfg.IndexPath)
+		if err != nil || stamp == old.stamp {
+			continue
+		}
+		sn, err := s.load()
+		if err != nil {
+			log.Printf("reload: %v (keeping the current index)", err)
+			continue
+		}
+		if sn.st.BuildID == old.st.BuildID {
+			old.stamp = sn.stamp // touched, not rebuilt
+			sn.st.Close()
+			continue
+		}
+		sn.explore.build(s.cfg.PapersPath, sn.st.Row)
+		// Switch once vecdb serves the new build too (it checks every 2 s), so feed requests
+		// never ask it for a build it has not loaded. vecdb keeps the previous build loaded for
+		// a while, so requests still in flight on the old snapshot are answered as well.
+		for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+			if vs, ok := s.db.Stats(); !ok || vs.BuildID == sn.st.BuildID {
+				break
+			}
+		}
+		s.cur.Store(sn)
+		log.Printf("reload: now serving %d papers (was %d)", sn.st.N, old.st.N)
+		time.AfterFunc(time.Minute, func() { old.st.Close() })
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -75,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 	api.Handle("POST /api/pending", s.requireSession(http.HandlerFunc(s.handlePending)))
 	api.Handle("POST /api/vectors", s.requireSession(http.HandlerFunc(s.handleVectors)))
 	api.HandleFunc("GET /api/healthz", s.handleHealth)
+	api.HandleFunc("GET /api/status", s.handleStatus)
 	limited := newLimiter(5, 20).wrap(api)
 
 	mux := http.NewServeMux()
@@ -84,13 +168,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sitemap.xml", s.handleSitemapIndex)
 	mux.HandleFunc("GET /sitemaps/{file}", s.handleSitemap)
 	mux.Handle("/", s.static())
-	return securityHeaders(mux)
+	return s.metrics.wrap(securityHeaders(mux))
 }
 
 // ---- handlers ----
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"turnstileSiteKey": s.turnstileSiteKey(), "dim": s.store.Dim})
+	st := s.snap().st
+	writeJSON(w, map[string]any{"turnstileSiteKey": s.turnstileSiteKey(), "dim": st.Dim})
 }
 
 func (s *Server) turnstileSiteKey() string {
@@ -148,6 +233,7 @@ type feedPaper struct {
 }
 
 func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	var req feedRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&req); err != nil {
 		httpError(w, http.StatusBadRequest, "bad json")
@@ -157,14 +243,14 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if k <= 0 || k > 20 {
 		k = 8
 	}
-	pref, ok := decodePref(req.Pref, s.store.Dim)
+	pref, ok := decodePref(req.Pref, st.Dim)
 	if !ok {
 		httpError(w, http.StatusBadRequest, "bad pref vector")
 		return
 	}
 	seen := make([]uint32, 0, len(req.Seen))
 	for _, id := range req.Seen {
-		if row, ok := s.store.Row(id); ok {
+		if row, ok := st.Row(id); ok {
 			seen = append(seen, row)
 		}
 	}
@@ -174,32 +260,33 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	var items []feed.Item
 	if req.Mode == "top" {
 		if pref == nil {
-			s.writePapers(w, nil, "")
+			s.writePapers(w, st, nil, "")
 			return
 		}
-		items = s.rec.Top(ctx, pref, seen, k)
+		items = s.rec.Top(ctx, st, pref, seen, k)
 	} else {
-		items = s.rec.Next(ctx, pref, seen, k)
+		items = s.rec.Next(ctx, st, pref, seen, k)
 	}
 
 	rows := make([]rowOut, len(items))
 	for i, it := range items {
 		rows[i] = rowOut{it.Row, it.Score, it.Reason}
 	}
-	s.writePapers(w, rows, "")
+	s.writePapers(w, st, rows, "")
 }
 
-func (s *Server) vector(row uint32) (string, float32) {
-	scale, q := s.store.Vector(row)
+func (s *Server) vector(st *store.Store, row uint32) (string, float32) {
+	scale, q := st.Vector(row)
 	return base64.StdEncoding.EncodeToString(int8Bytes(q)), scale
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	st := s.snap().st
 	alive := s.db.Alive()
 	if !alive {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	writeJSON(w, map[string]any{"papers": s.store.N, "vecdb": alive, "pending": s.pending.count()})
+	writeJSON(w, map[string]any{"papers": st.N, "vecdb": alive, "pending": s.pending.count()})
 }
 
 // decodePref returns the L2-normalised preference vector, nil for "none", ok=false if malformed.

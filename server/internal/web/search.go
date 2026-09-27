@@ -250,6 +250,8 @@ func (s *searcher) get(ctx context.Context, u string, out any) error {
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	sn := s.snap()
+	st := sn.st
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" || len(q) > 200 {
 		httpError(w, http.StatusBadRequest, "query must be 1-200 characters")
@@ -265,23 +267,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	res, err := s.search.search(ctx, q, sortBy, page)
 	if err != nil {
-		if s.store.N > maxLocalSearch {
+		if st.N > maxLocalSearch {
 			log.Printf("search %q: %v", q, err)
 			httpError(w, http.StatusBadGateway, "Search is busy right now. Try again in a minute.")
 			return
 		}
 		log.Printf("search %q: %v; falling back to the local index", q, err)
-		res = s.localSearch(q, sortBy, page)
+		res = s.localSearch(sn, q, sortBy, page)
 	}
 	// Attach vectors (and our cleaner metadata) for papers we have indexed. Copy first:
 	// the cached slice is shared between requests.
 	out := searchResult{Source: res.Source, Total: res.Total, Page: res.Page, Papers: make([]feedPaper, len(res.Papers))}
 	for i, p := range res.Papers {
-		if row, ok := s.store.Row(p.ID); ok {
-			if meta, err := s.store.Paper(row); err == nil {
+		if row, ok := st.Row(p.ID); ok {
+			if meta, err := st.Paper(row); err == nil {
 				p.Paper = meta
 			}
-			p.Vec, p.Scale = s.vector(row)
+			p.Vec, p.Scale = s.vector(st, row)
 			p.Indexed = true
 		}
 		out.Papers[i] = p
@@ -303,17 +305,18 @@ type titleIndex struct {
 	years  []int16
 }
 
-func (s *Server) localSearch(q, sortBy string, page int) searchResult {
-	s.titles.once.Do(func() {
-		t := make([]string, s.store.N)
-		c, y := make([]int32, s.store.N), make([]int16, s.store.N)
+func (s *Server) localSearch(sn *snapshot, q, sortBy string, page int) searchResult {
+	st := sn.st
+	sn.titles.once.Do(func() {
+		t := make([]string, st.N)
+		c, y := make([]int32, st.N), make([]int16, st.N)
 		for row := range t {
-			if p, err := s.store.Paper(uint32(row)); err == nil {
+			if p, err := st.Paper(uint32(row)); err == nil {
 				t[row] = strings.ToLower(p.Title + " " + p.Field)
 				c[row], y[row] = int32(p.CitedBy), int16(p.Year)
 			}
 		}
-		s.titles.titles, s.titles.cited, s.titles.years = t, c, y
+		sn.titles.titles, sn.titles.cited, sn.titles.years = t, c, y
 	})
 	terms := strings.Fields(strings.ToLower(q))
 	type match struct {
@@ -322,7 +325,7 @@ func (s *Server) localSearch(q, sortBy string, page int) searchResult {
 	}
 	var matches []match
 	dup := map[string]bool{} // OpenAlex has duplicate records of the same paper
-	for row, title := range s.titles.titles {
+	for row, title := range sn.titles.titles {
 		score := 0
 		for _, t := range terms {
 			if strings.Contains(title, t) {
@@ -337,7 +340,7 @@ func (s *Server) localSearch(q, sortBy string, page int) searchResult {
 	}
 	// Best match first (ties keep index order, which ingest puts roughly by citations);
 	// with a sort, among the rows that match best.
-	ti := &s.titles
+	ti := sn.titles
 	sort.SliceStable(matches, func(a, b int) bool {
 		ma, mb := matches[a], matches[b]
 		if ma.score != mb.score {
@@ -353,7 +356,7 @@ func (s *Server) localSearch(q, sortBy string, page int) searchResult {
 	})
 	res := searchResult{Source: "local", Total: len(matches), Page: page}
 	for _, m := range matches[min((page-1)*searchPerPage, len(matches)):min(page*searchPerPage, len(matches))] {
-		if p, err := s.store.Paper(m.row); err == nil {
+		if p, err := st.Paper(m.row); err == nil {
 			res.Papers = append(res.Papers, feedPaper{Paper: p, Reason: "search"})
 		}
 	}
