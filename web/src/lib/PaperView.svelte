@@ -1,13 +1,22 @@
 <script lang="ts">
   // One paper followed by its nearest neighbours. Opened from "More like this" and from
-  // shared links (#/p/W123).
+  // shared links (/p/W123).
   import Feed from './Feed.svelte'
   import { getPaper, type PaperDetail } from './api'
 
-  let { id, active, onclose }: { id: string; active: boolean; onclose: () => void } = $props()
+  let {
+    id,
+    active,
+    onclose,
+    onopen,
+  }: { id: string; active: boolean; onclose: () => void; onopen: (id: string) => void } = $props()
 
   let detail = $state<PaperDetail | null>(null)
   let error = $state('')
+
+  $effect(() => {
+    if (detail) document.title = `${detail.paper.title} · PaperTik`
+  })
 
   $effect(() => {
     const want = id
@@ -42,7 +51,7 @@
     <button class="back" onclick={onclose} aria-label="Back">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
-    <span class="title">More like this</span>
+    <h1 class="title">More like this{detail ? `: ${detail.paper.title}` : ''}</h1>
     {#if detail && detail.seedBasis > 0}<span class="badge" title="Seeded from related papers">approx.</span>{/if}
   </div>
   {#if error}
@@ -60,6 +69,7 @@
         mode="top"
         refreshOnLike={false}
         exclude={[id]}
+        {onopen}
         {endNote}
         {active}
       />
@@ -106,8 +116,13 @@
     stroke-linejoin: round;
   }
   .title {
+    margin: 0;
     font-weight: 700;
     font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   .badge {
     font-size: 11px;

@@ -60,6 +60,7 @@ func main() {
 		IndexPath:        *index,
 		PapersPath:       *papers,
 		PublicURL:        os.Getenv("PUBLIC_URL"),
+		FacebookAppID:    os.Getenv("FB_APP_ID"),
 	}
 	if cfg.TurnstileSecret == "" {
 		log.Printf("TURNSTILE_SECRET unset: bot verification disabled")

@@ -2,7 +2,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -32,6 +31,7 @@ type Config struct {
 	PendingPath      string // where to log papers to ingest later (empty = don't log)
 	IndexPath        string // index.bin; watched, and reloaded when a new build replaces it
 	PapersPath       string // papers.jsonl (append-only; the index points into it)
+	FacebookAppID    string // optional fb:app_id for Facebook link previews / Insights
 	PublicURL        string // e.g. https://papertik.app, for canonical links and sitemaps (default: from the request)
 }
 
@@ -168,7 +168,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sitemap.xml", s.handleSitemapIndex)
 	mux.HandleFunc("GET /sitemaps/{file}", s.handleSitemap)
 	mux.Handle("/", s.static())
-	return s.metrics.wrap(securityHeaders(mux))
+	return s.metrics.wrap(s.canonicalHost(securityHeaders(mux)))
 }
 
 // ---- handlers ----
@@ -334,18 +334,7 @@ func (s *Server) static() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
 		if st, err := os.Stat(p); err != nil || st.IsDir() || r.URL.Path == "/index.html" {
-			// SPA fallback. Open Graph wants absolute URLs, so fill in the origin.
-			page, err := s.index.get(filepath.Join(dir, "index.html"))
-			if err != nil {
-				http.Error(w, "not built", http.StatusInternalServerError)
-				return
-			}
-			base := s.baseURL(r)
-			page = bytes.Replace(page, []byte(`content="/og-image.png"`), []byte(`content="`+base+`/og-image.png"`), 1)
-			page = bytes.Replace(page, []byte("<!--/seo-->"), []byte(`<link rel="canonical" href="`+base+`/" />`), 1)
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Write(page)
+			s.renderShell(w, r) // an app page: per-route title, canonical URL, Open Graph tags
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/assets/") {

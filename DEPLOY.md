@@ -114,6 +114,7 @@ SESSION_KEY=$(openssl rand -hex 32)
 TURNSTILE_SITEKEY=
 TURNSTILE_SECRET=
 OPENALEX_API_KEY=
+FB_APP_ID=
 ENV
 sudo chown root:papertok /etc/papertok.env && sudo chmod 640 /etc/papertok.env
 sudo chown -R papertok: /opt/papertok
@@ -172,6 +173,11 @@ Then add a **public hostname**: `papertik.app` → service `http://127.0.0.1:808
 
 The Go server trusts `CF-Connecting-IP` only when the TCP peer is loopback, which is exactly
 the tunnel. Per-IP rate limiting (5 req/s, burst 20 on `/api/*`) therefore sees real visitor IPs.
+
+**`www`.** Add a second public hostname, `www.papertik.app` → the same `http://127.0.0.1:8080`.
+The server answers every `www` request with a 301 to `https://papertik.app` (same path), so
+search engines see one site. (A Cloudflare *Redirect Rule* from `www` to the apex works too;
+either way `www` needs a DNS record, which the public hostname creates.)
 
 ### 5.3 Bot protection and rate limits
 - **Security → Bots**: turn on *Bot Fight Mode* (or *Super Bot Fight Mode* on paid plans).

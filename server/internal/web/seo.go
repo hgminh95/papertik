@@ -68,7 +68,10 @@ var paperHead = template.Must(template.New("head").Parse(`<title>{{.Title}} · P
     <meta property="og:description" content="{{.Description}}" />
     <meta property="og:url" content="{{.URL}}" />
     <meta property="og:image" content="{{.Base}}/og-image.png" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    {{if .FBAppID}}<meta property="fb:app_id" content="{{.FBAppID}}" />
+    {{end}}<meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{{.Title}}" />
     <meta name="twitter:description" content="{{.Description}}" />
     <meta name="citation_title" content="{{.Title}}" />
@@ -171,7 +174,7 @@ func (s *Server) handlePaperPage(w http.ResponseWriter, r *http.Request) {
 	ldJSON, _ := json.Marshal(ld)
 
 	data := map[string]any{
-		"Title": p.Title, "Description": desc, "URL": url, "Base": base,
+		"Title": p.Title, "Description": desc, "URL": url, "Base": base, "FBAppID": s.cfg.FacebookAppID,
 		"Authors": p.Authors, "Year": p.Year, "DOI": p.DOI,
 		"JSONLD": template.JS(ldJSON), // json.Marshal escapes <, > and & so this cannot close the script tag
 		"Byline": byline, "Abstract": p.Abstract, "Link": link,

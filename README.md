@@ -142,7 +142,13 @@ stateless).
 
 ## SEO
 
-Shared links are real paths (`/p/W123`). The Go server renders them with the paper's title,
+Every page is a real path (`/`, `/discover`, `/search`, `/me`, `/status`, `/p/W123`) and the
+server renders each with its own title, description, canonical URL and Open Graph tags
+(`noindex` on search, personal and status; 404 for unknown paths; `www.` redirects to the bare
+domain with a 301). The home page HTML carries an introduction with links to the most cited
+papers and to each field, for crawlers. Set `FB_APP_ID` to add `fb:app_id`.
+
+Paper pages (`/p/W123`) are rendered with the paper's title,
 description, Open Graph / Twitter tags, Google Scholar `citation_*` tags, JSON-LD
 (`ScholarlyArticle`) and a readable copy of the abstract; the SPA takes over in the browser.
 `/robots.txt` and `/sitemap.xml` (a sitemap index of 50k-URL files) list every indexed paper.

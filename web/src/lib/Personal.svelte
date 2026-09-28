@@ -105,6 +105,7 @@
 </script>
 
 <div class="page">
+  <h1 class="sr-only">Personal: your likes, bookmarks and taste vector</h1>
   <p class="local" role="note">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" /></svg>
     <span
@@ -140,7 +141,7 @@
         <ol class="list">
           {#each closest as p (p.id)}
             <li>
-              <a href="#/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
+              <a href="/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
               <span class="dim">{[p.field, p.year].filter(Boolean).join(' · ')} · similarity {p.score?.toFixed(2)}</span>
             </li>
           {/each}
@@ -165,7 +166,7 @@
         {#each user.bookmarks as p (p.id)}
           <li class="row">
             <div>
-              <a href="#/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
+              <a href="/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
               <span class="dim"
                 >{[p.venue, p.year].filter(Boolean).join(' ')} · <a class="ext" href={linkFor(p)} target="_blank" rel="noopener noreferrer"
                   >Read</a
@@ -196,7 +197,7 @@
         {#each user.liked as p (p.id)}
           <li class="row">
             <div>
-              <a href="#/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
+              <a href="/p/{p.id}" onclick={(e) => open(e, p.id)}>{p.title}</a>
               <span class="dim"
                 >{[p.venue, p.year].filter(Boolean).join(' ')}{#if pendingIds.has(p.id)}<span class="tag">pending index</span>{/if}</span
               >
@@ -219,7 +220,7 @@
         {#each historyShown as h (h.id)}
           <li class="row">
             <div>
-              <a href="#/p/{h.id}" onclick={(e) => open(e, h.id)}>{h.title}</a>
+              <a href="/p/{h.id}" onclick={(e) => open(e, h.id)}>{h.title}</a>
               <span class="dim">{[h.field, h.year].filter(Boolean).join(' · ')}</span>
             </div>
             <span class="when">
@@ -272,7 +273,7 @@
     </a>
     <span
       >Paper data from <a href="https://openalex.org" target="_blank" rel="noopener noreferrer">OpenAlex</a> ·
-      <a href="#/status" onclick={(e) => (e.preventDefault(), onstatus())}>System status</a></span
+      <a href="/status" onclick={(e) => (e.preventDefault(), onstatus())}>System status</a></span
     >
   </footer>
 </div>

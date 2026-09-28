@@ -10,6 +10,7 @@
     onlike,
     ontogglelike,
     ontogglebookmark,
+    onopen,
   }: {
     paper: Paper
     liked: boolean
@@ -17,6 +18,7 @@
     onlike: () => void
     ontogglelike: () => void
     ontogglebookmark: () => void
+    onopen?: (id: string) => void
   } = $props()
 
   let expanded = $state(false)
@@ -118,6 +120,18 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" /></svg>
       <span>{bookmarked ? 'Saved' : 'Save'}</span>
     </button>
+    <!-- A real link to the paper's page (crawlable, shareable); in the app it opens in place. -->
+    <a
+      class="action"
+      href="/p/{paper.id}"
+      aria-label="Similar papers"
+      onclick={(e) => {
+        if (onopen && !e.metaKey && !e.ctrlKey && !e.shiftKey) (e.preventDefault(), onopen(paper.id))
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h16M4 17h7M17 4l3 3-3 3" /></svg>
+      <span>Similar</span>
+    </a>
     <a class="action" href={link} target="_blank" rel="noopener noreferrer" aria-label="Read the paper">
       <svg viewBox="0 0 24 24" aria-hidden="true"
         ><path d="M6 2h8l6 6v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm7 1.5V9h5.5M8 13h8M8 17h8" /></svg

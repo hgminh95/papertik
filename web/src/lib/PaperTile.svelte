@@ -11,7 +11,7 @@
   })
 </script>
 
-<a class="tile" href="#/p/{paper.id}" onclick={(e) => (e.preventDefault(), onopen(paper.id))}>
+<a class="tile" href="/p/{paper.id}" onclick={(e) => (e.preventDefault(), onopen(paper.id))}>
   <div class="top">
     {#if rank}<span class="rank">#{rank}</span>{/if}
     <span class="field"><FieldBadge field={paper.field} size={12} /></span>

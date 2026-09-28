@@ -12,7 +12,7 @@
   const MAX_CHIPS = 14
 
   let fields = $state<FieldCount[]>([])
-  let field = $state('') // '' = all fields
+  let field = $state(new URLSearchParams(location.search).get('field') ?? '') // '' = all fields
   let sort = $state<'cited' | 'recent'>('cited')
   let papers = $state<Paper[]>([])
   let page = $state(0)
@@ -86,6 +86,7 @@
   function pick(f: string) {
     if (f === field) return
     field = f
+    history.replaceState(null, '', f ? `/discover?field=${encodeURIComponent(f)}` : '/discover')
     load(true)
   }
 
@@ -111,6 +112,7 @@
 </script>
 
 <div class="page">
+  <h1 class="sr-only">Discover computer science papers</h1>
   <button class="searchbar" onclick={onsearch}>
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
     <span>Search papers</span>

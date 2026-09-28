@@ -29,7 +29,7 @@
     'formal verification',
   ]
 
-  const params = new URLSearchParams(location.hash.split('?')[1] ?? '')
+  const params = new URLSearchParams(location.search)
   let query = $state(params.get('q') ?? '')
   let sort = $state<SearchSort>((['cited', 'recent'].includes(params.get('sort') ?? '') ? params.get('sort') : '') as SearchSort)
   let input: HTMLInputElement
@@ -58,7 +58,7 @@
       page = res.page
       source = res.source
       submitted = q
-      history.replaceState(null, '', `#/search?q=${encodeURIComponent(q)}${sort ? `&sort=${sort}` : ''}`)
+      history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}${sort ? `&sort=${sort}` : ''}`)
     } catch (e) {
       error = e instanceof Error ? e.message : 'Search failed'
     } finally {
@@ -83,7 +83,7 @@
     query = ''
     results = []
     submitted = ''
-    history.replaceState(null, '', '#/search')
+    history.replaceState(null, '', '/search')
     input.focus()
   }
 
@@ -94,6 +94,7 @@
 </script>
 
 <div class="page">
+  <h1 class="sr-only">Search computer science papers</h1>
   <div class="top">
   <button class="back" onclick={onclose} aria-label="Close search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>

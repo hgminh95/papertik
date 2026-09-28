@@ -13,44 +13,44 @@
   type Tab = 'foryou' | 'discover' | 'personal' | 'status'
   // Order and icons follow TikTok: For You (home), Explore (compass), Profile (person).
   const TABS: { id: Tab; label: string; hash: string; icon: string }[] = [
-    { id: 'foryou', label: 'For You', hash: '#/', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z' },
+    { id: 'foryou', label: 'For You', hash: '/', icon: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z' },
     {
       id: 'discover',
       label: 'Discover',
-      hash: '#/discover',
+      hash: '/discover',
       icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm3.5 5.5-2 5-5 2 2-5z',
     },
     {
       id: 'personal',
       label: 'Personal',
-      hash: '#/me',
+      hash: '/me',
       icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0',
     },
   ]
 
-  // Shared links are real paths (/p/W123, rendered by the server for previews and crawlers).
-  // Inside the app everything is hash-routed, so turn one into #/p/W123 on arrival.
-  const pathPaper = /^\/p\/(W\d+)\/?$/i.exec(location.pathname)?.[1]
-  if (pathPaper) history.replaceState(null, '', `/#/p/${pathPaper.toUpperCase()}`)
+  // Routes are real paths (/discover, /search?q=…, /me, /status, /p/W123): the server renders
+  // each with its own title and meta tags. Links from before used #/…; move those to paths.
+  if (location.hash.startsWith('#/')) history.replaceState(null, '', location.hash.slice(1) || '/')
 
   function fromHash(): Tab {
-    const h = location.hash
-    if (h.startsWith('#/discover')) return 'discover'
-    if (h.startsWith('#/me')) return 'personal'
-    if (h.startsWith('#/status')) return 'status'
+    const p = location.pathname
+    if (p.startsWith('/discover')) return 'discover'
+    if (p.startsWith('/me')) return 'personal'
+    if (p.startsWith('/status')) return 'status'
     return 'foryou'
   }
-  const paperFromHash = () => /^#\/p\/(W\d+)/i.exec(location.hash)?.[1]?.toUpperCase() ?? null
+  const paperFromHash = () => /^\/p\/(W\d+)\/?$/i.exec(location.pathname)?.[1]?.toUpperCase() ?? null
+  const isSearch = () => location.pathname.startsWith('/search')
 
   let tab = $state<Tab>(fromHash())
   // Keep Discover mounted once opened so results survive tab switches.
   let discoverOpened = $state(fromHash() === 'discover')
-  // A single paper + "more like this", layered over the current tab (#/p/W123).
+  // A single paper + "more like this", layered over the current tab (/p/W123).
   let paperId = $state<string | null>(paperFromHash())
   let openedInApp = false // whether Back can return to where the paper was opened from
-  // The search screen, layered over the current tab (#/search?q=…). A paper opened from the
+  // The search screen, layered over the current tab (/search?q=…). A paper opened from the
   // results goes on top of it, so Back returns to the results.
-  let searching = $state(location.hash.startsWith('#/search'))
+  let searching = $state(isSearch())
   let searchOpenedInApp = false
   let forYou: Feed
 
@@ -62,26 +62,26 @@
   function onroute() {
     paperId = paperFromHash()
     if (paperId) return
-    searching = location.hash.startsWith('#/search')
+    searching = isSearch()
     if (!searching) show(fromHash())
   }
 
   function select(t: Tab) {
     paperId = null
     searching = false
-    if (t === tab && location.hash === hashOf(t)) return
+    if (t === tab && location.pathname === hashOf(t)) return
     show(t)
     history.pushState(null, '', hashOf(t))
   }
 
-  const hashOf = (t: Tab) => (t === 'status' ? '#/status' : TABS.find((x) => x.id === t)!.hash)
+  const hashOf = (t: Tab) => (t === 'status' ? '/status' : TABS.find((x) => x.id === t)!.hash)
 
   function openSearch() {
     paperId = null
     if (searching) return
     searchOpenedInApp = true
     searching = true
-    history.pushState(null, '', '#/search')
+    history.pushState(null, '', '/search')
   }
 
   function closeSearch() {
@@ -97,7 +97,7 @@
   function openPaper(id: string) {
     openedInApp = true
     paperId = id
-    history.pushState(null, '', `#/p/${id}`)
+    history.pushState(null, '', `/p/${id}`)
   }
 
   function closePaper() {
@@ -107,18 +107,29 @@
     } else {
       // Arrived through a shared link: fall through to the For You feed.
       paperId = null
-      history.replaceState(null, '', TABS.find((x) => x.id === tab)!.hash)
+      history.replaceState(null, '', hashOf(tab))
     }
   }
+
+  // Keep the tab title in step with the route (the server sets it for the first load).
+  const TITLES: Record<Tab, string> = {
+    foryou: 'PaperTik · TikTok-style feed of computer science papers',
+    discover: 'Discover computer science papers · PaperTik',
+    personal: 'Personal · PaperTik',
+    status: 'System status · PaperTik',
+  }
+  $effect(() => {
+    if (!paperId) document.title = searching ? 'Search papers · PaperTik' : TITLES[tab]
+  })
 
   onMount(syncPendingLikes)
 </script>
 
-<svelte:window onpopstate={onroute} onhashchange={onroute} />
+<svelte:window onpopstate={onroute} />
 
 <div class="shell">
   <nav class="nav" aria-label="Sections">
-    <a class="brand" href="#/" onclick={(e) => (e.preventDefault(), select('foryou'))} aria-label="PaperTik home">
+    <a class="brand" href="/" onclick={(e) => (e.preventDefault(), select('foryou'))} aria-label="PaperTik home">
       <img src="/favicon.svg" alt="" width="32" height="32" />
       <span class="wordmark">Paper<span>Tik</span></span>
     </a>
@@ -147,7 +158,7 @@
     <a
       class="statuslink"
       class:active={tab === 'status' && !paperId && !searching}
-      href="#/status"
+      href="/status"
       onclick={(e) => (e.preventDefault(), select('status'))}
       aria-label="System status"
     >
@@ -156,13 +167,14 @@
     </a>
     <a class="github" href="https://github.com/hgminh95/papertok" target="_blank" rel="noopener noreferrer" aria-label="PaperTik on GitHub">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.6.3-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2z" /></svg>
-      <span class="label">Open source on GitHub</span>
+      <span class="label">GitHub</span>
     </a>
   </nav>
 
   <main>
     <div class="view" hidden={tab !== 'foryou'}>
-      <Feed bind:this={forYou} getPref={() => user.pref} active={tab === 'foryou' && !paperId && !searching} />
+      <h1 class="sr-only">PaperTik: a TikTok-style feed of computer science papers</h1>
+      <Feed bind:this={forYou} getPref={() => user.pref} active={tab === 'foryou' && !paperId && !searching} onopen={openPaper} />
       <button class="search-fab" onclick={openSearch} aria-label="Search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       </button>
@@ -186,7 +198,7 @@
       </div>
     {/if}
     {#if paperId}
-      <PaperView id={paperId} active onclose={closePaper} />
+      <PaperView id={paperId} active onclose={closePaper} onopen={openPaper} />
     {/if}
   </main>
 

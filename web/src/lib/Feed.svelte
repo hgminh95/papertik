@@ -13,6 +13,7 @@
     exclude = [],
     lead = null,
     endNote = '',
+    onopen,
   }: {
     /** The vector the feed is seeded with (base64 f32), or null for a random feed. */
     getPref: () => string | null
@@ -28,6 +29,8 @@
     lead?: Paper | null
     /** Shown when a 'top' feed has nothing more to show. */
     endNote?: string
+    /** Open a paper (and its similar papers) in the app. */
+    onopen?: (id: string) => void
   } = $props()
 
   const PREFETCH_WHEN_LEFT = 3
@@ -186,6 +189,7 @@
         onlike={() => doLike(paper)}
         ontogglelike={() => toggleLike(paper)}
         ontogglebookmark={() => bookmarkPaper(paper)}
+        {onopen}
       />
     </section>
   {/each}
