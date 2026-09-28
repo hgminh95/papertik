@@ -155,6 +155,8 @@ eventfd/futex doorbell can be added later on Linux without changing the layout.
 
 ## TODO
 
+- [x] Own categories from OpenAlex topics (`ingest/taxonomy.json`); exclude non-CS topics.
+
 - [ ] **Replace OpenAlex for search.** It is too expensive to depend on: anonymous search is
   throttled and serious traffic needs a paid API key. Candidates: our own full-text index over
   titles + abstracts (Tantivy, Meilisearch or SQLite FTS5 next to `papers.jsonl`), ideally

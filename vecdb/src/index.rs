@@ -368,13 +368,16 @@ pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>,
     // A partial last row means the embedder is mid-write; index the complete rows.
     let n_emb = emb.len() / row_bytes;
 
-    // Stop at the number of embedded rows (embedding may still be in progress).
+    // Stop at the number of embedded rows (embedding may still be in progress). Rows marked
+    // "excluded" (not computer science, see ingest/taxonomy.json) keep their line and embedding
+    // but are left out of the index.
     let mut reader = BufReader::new(File::open(papers).with_context(|| format!("open {}", papers.display()))?);
     let mut b = Builder::new(dim, n_emb);
     let mut pos = 0u64;
     let mut line = String::new();
     let mut row = vec![0f32; dim];
-    while b.len() < n_emb {
+    let (mut rows, mut excluded) = (0usize, 0usize);
+    while rows < n_emb {
         line.clear();
         let read = reader.read_line(&mut line)?;
         if read == 0 {
@@ -383,18 +386,29 @@ pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>,
         #[derive(serde::Deserialize)]
         struct Row {
             id: String,
+            #[serde(default)]
+            excluded: bool,
         }
-        let r: Row = serde_json::from_str(&line).with_context(|| format!("papers.jsonl line {}", b.len() + 1))?;
+        let r: Row = serde_json::from_str(&line).with_context(|| format!("papers.jsonl line {}", rows + 1))?;
+        let i = rows;
+        rows += 1;
+        let start = pos;
+        pos += read as u64;
+        if r.excluded {
+            excluded += 1;
+            continue;
+        }
         let id = parse_openalex_id(&r.id).with_context(|| format!("bad id {:?}", r.id))?;
-        let i = b.len();
         for (j, c) in emb[i * row_bytes..(i + 1) * row_bytes].chunks_exact(4).enumerate() {
             row[j] = f32::from_le_bytes(c.try_into().unwrap());
         }
-        b.push(id, [pos, pos + read as u64], &mut row);
-        pos += read as u64;
+        b.push(id, [start, pos], &mut row);
     }
-    if b.len() < n_emb {
-        bail!("papers.jsonl has {} lines but embeddings has {} rows", b.len(), n_emb);
+    if rows < n_emb {
+        bail!("papers.jsonl has {} lines but embeddings has {} rows", rows, n_emb);
+    }
+    if excluded > 0 {
+        eprintln!("left out {excluded} excluded papers");
     }
     let n = b.len();
     b.finish(nlist.unwrap_or_else(|| auto_nlist(n)), out, 42)

@@ -61,7 +61,10 @@ type openAlexWork struct {
 		PDFURL string `json:"pdf_url"`
 	} `json:"best_oa_location"`
 	PrimaryTopic *struct {
-		Subfield struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		Subfield    struct {
+			ID          string `json:"id"`
 			DisplayName string `json:"display_name"`
 		} `json:"subfield"`
 	} `json:"primary_topic"`
@@ -74,8 +77,9 @@ func cleanText(s string) string {
 	return strings.TrimSpace(multSpace.ReplaceAllString(htmlTag.ReplaceAllString(s, ""), " "))
 }
 
-func (w *openAlexWork) paper() store.Paper {
-	p := store.Paper{
+// paper converts an OpenAlex work; excluded reports a topic outside computer science.
+func (w *openAlexWork) paper(tx *taxonomy) (p store.Paper, excluded bool) {
+	p = store.Paper{
 		ID:      w.ID[strings.LastIndexByte(w.ID, '/')+1:],
 		Title:   cleanText(w.Title),
 		Year:    w.PublicationYear,
@@ -96,8 +100,9 @@ func (w *openAlexWork) paper() store.Paper {
 	if w.BestOALocation != nil {
 		p.PDFURL = w.BestOALocation.PDFURL
 	}
-	if w.PrimaryTopic != nil {
-		p.Field = w.PrimaryTopic.Subfield.DisplayName
+	if t := w.PrimaryTopic; t != nil {
+		p.Field, excluded = tx.classify(t.ID, t.Subfield.ID, t.Subfield.DisplayName)
+		p.Topic = t.DisplayName
 	}
 	if inv := w.AbstractInvertedIndex; len(inv) > 0 {
 		type tok struct {
@@ -117,7 +122,7 @@ func (w *openAlexWork) paper() store.Paper {
 		}
 		p.Abstract = cleanText(strings.Join(words, " "))
 	}
-	return p
+	return p, excluded
 }
 
 type searchResult struct {
@@ -138,6 +143,7 @@ type cachedWork struct {
 }
 
 type searcher struct {
+	tx     *taxonomy
 	mailto string
 	apiKey string
 	client *http.Client
@@ -146,8 +152,8 @@ type searcher struct {
 	works  map[string]cachedWork
 }
 
-func newSearcher(mailto, apiKey string) *searcher {
-	return &searcher{mailto: mailto, apiKey: apiKey, client: &http.Client{Timeout: 8 * time.Second}, cache: map[string]cached{}, works: map[string]cachedWork{}}
+func newSearcher(mailto, apiKey string, tx *taxonomy) *searcher {
+	return &searcher{tx: tx, mailto: mailto, apiKey: apiKey, client: &http.Client{Timeout: 8 * time.Second}, cache: map[string]cached{}, works: map[string]cachedWork{}}
 }
 
 // searchSorts maps our sort names to OpenAlex's; "" is relevance.
@@ -189,8 +195,8 @@ func (s *searcher) search(ctx context.Context, q, sortBy string, page int) (sear
 	}
 	res := searchResult{Source: "openalex", Total: body.Meta.Count, Page: page, Papers: make([]feedPaper, 0, len(body.Results))}
 	for i := range body.Results {
-		p := body.Results[i].paper()
-		if p.Title == "" {
+		p, excluded := body.Results[i].paper(s.tx)
+		if p.Title == "" || excluded {
 			continue
 		}
 		res.Papers = append(res.Papers, feedPaper{Paper: p, Reason: "search"})

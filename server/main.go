@@ -34,6 +34,7 @@ func main() {
 	papers := flag.String("papers", "data/papers.jsonl", "paper metadata")
 	shmPath := flag.String("shm", defaultShmPath(), "vecdb shared-memory file")
 	static := flag.String("static", "web/dist", "built SPA")
+	taxonomyPath := flag.String("taxonomy", "ingest/taxonomy.json", "OpenAlex topic -> category table (for live search results)")
 	pprofAddr := flag.String("pprof", "", "serve net/http/pprof on this address (e.g. 127.0.0.1:6060); off by default")
 	pending := flag.String("pending", "", "log of papers to ingest later (default: pending.jsonl next to -papers)")
 	flag.Parse()
@@ -58,6 +59,7 @@ func main() {
 		OpenAlexAPIKey:   os.Getenv("OPENALEX_API_KEY"),
 		PendingPath:      *pending,
 		IndexPath:        *index,
+		TaxonomyPath:     *taxonomyPath,
 		PapersPath:       *papers,
 		PublicURL:        os.Getenv("PUBLIC_URL"),
 		FacebookAppID:    os.Getenv("FB_APP_ID"),

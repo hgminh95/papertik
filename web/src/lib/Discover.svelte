@@ -9,7 +9,7 @@
 
   let { onopen, onsearch }: { onopen: (id: string) => void; onsearch: () => void } = $props()
 
-  const MAX_CHIPS = 14
+  const MAX_CHIPS = 24 // every category (the row scrolls sideways)
 
   let fields = $state<FieldCount[]>([])
   let field = $state(new URLSearchParams(location.search).get('field') ?? '') // '' = all fields

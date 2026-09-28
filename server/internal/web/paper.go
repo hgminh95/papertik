@@ -55,7 +55,8 @@ func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.pending.add(id, "opened")
-	res := response{Paper: feedPaper{Paper: work.paper(), Reason: "shared"}}
+	p, _ := work.paper(s.search.tx) // a paper someone opened directly: show it even if excluded
+	res := response{Paper: feedPaper{Paper: p, Reason: "shared"}}
 	var sum []float32
 	for _, rel := range append(work.RelatedWorks, work.ReferencedWorks...) {
 		row, ok := st.Row(rel)

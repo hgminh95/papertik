@@ -56,6 +56,14 @@ they wait for the first index) and watch the index grow on the **System status**
 backfill it keeps checking for new papers, and picks up papers users liked before they were
 indexed. Stop and restart it at any time; it resumes.
 
+**Categories.** OpenAlex gives every paper an accurate *topic*, but files topics into coarse
+subfields (its "Artificial Intelligence" holds programming languages, cryptography and quantum
+computing) and files some non-CS topics (education, geology) under Computer Science.
+`ingest/taxonomy.json` maps each of OpenAlex's 302 CS topics to one of PaperTik's 18 categories,
+or excludes it; excluded papers are never embedded, and ones already stored are left out of the
+index. Edit the file and bump its `version` to relabel everything: the ingest service re-fetches
+each stored paper's topic once and swaps in the result.
+
 `ingest/fetch.py` and `ingest/embed.py` still work on their own for one-off jobs (e.g. embedding
 on a GPU machine).
 

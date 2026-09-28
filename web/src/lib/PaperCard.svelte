@@ -80,6 +80,7 @@
     <div class="meta">
       <span class="chip">{badge}</span>
       <FieldBadge field={paper.field} size={14} />
+      {#if paper.topic && paper.topic !== paper.field}<span class="topic" title="OpenAlex topic">{paper.topic}</span>{/if}
     </div>
     <h2 class="title">{paper.title}</h2>
     <p class="byline">
@@ -196,6 +197,15 @@
     flex-wrap: wrap;
     font-size: 13px;
     color: var(--muted);
+  }
+  .topic {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topic::before {
+    content: '· ';
   }
   .chip {
     background: var(--chip);

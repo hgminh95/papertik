@@ -30,6 +30,7 @@ type Config struct {
 	OpenAlexAPIKey   string // optional, raises OpenAlex rate limits
 	PendingPath      string // where to log papers to ingest later (empty = don't log)
 	IndexPath        string // index.bin; watched, and reloaded when a new build replaces it
+	TaxonomyPath     string // ingest/taxonomy.json: OpenAlex topic -> PaperTik category, for live search results
 	PapersPath       string // papers.jsonl (append-only; the index points into it)
 	FacebookAppID    string // optional fb:app_id for Facebook link previews / Insights
 	PublicURL        string // e.g. https://papertik.app, for canonical links and sitemaps (default: from the request)
@@ -71,7 +72,7 @@ func New(cfg Config, db *shm.Client, rec *feed.Recommender) (*Server, error) {
 	srv := &Server{
 		cfg: cfg, db: db, rec: rec,
 		sessions: sessions{key: cfg.SessionKey},
-		search:   newSearcher(cfg.OpenAlexMailto, cfg.OpenAlexAPIKey),
+		search:   newSearcher(cfg.OpenAlexMailto, cfg.OpenAlexAPIKey, loadTaxonomy(cfg.TaxonomyPath)),
 		pending:  pending,
 	}
 	sn, err := srv.load()

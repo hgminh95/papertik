@@ -23,7 +23,8 @@ type Paper struct {
 	Authors  []string `json:"authors"`
 	Year     int      `json:"year"`
 	Venue    string   `json:"venue"`
-	Field    string   `json:"field,omitempty"`
+	Field    string   `json:"field,omitempty"` // PaperTik category (ingest/taxonomy.json)
+	Topic    string   `json:"topic,omitempty"` // the OpenAlex topic, more specific
 	DOI      string   `json:"doi,omitempty"`
 	URL      string   `json:"url,omitempty"`
 	PDFURL   string   `json:"pdf_url,omitempty"`

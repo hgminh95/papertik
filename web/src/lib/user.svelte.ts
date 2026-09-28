@@ -7,7 +7,8 @@ export interface Paper {
   authors: string[] | null
   year: number
   venue: string
-  field?: string
+  field?: string // PaperTik category
+  topic?: string // the OpenAlex topic, more specific
   doi?: string
   url?: string
   pdf_url?: string

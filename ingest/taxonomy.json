@@ -1,0 +1,1247 @@
+{
+ "version": 1,
+ "about": "PaperTik's categories for OpenAlex topics (field 17, Computer Science). 'topics' maps each OpenAlex topic id to one of 'categories', or null to exclude it (not computer science). Topics not listed fall back to 'subfields' (by OpenAlex subfield id). Bump 'version' after editing: the ingest service then relabels every stored paper once.",
+ "categories": [
+  "Artificial Intelligence",
+  "Natural Language Processing",
+  "Computer Vision",
+  "Programming Languages",
+  "Security & Cryptography",
+  "Quantum Computing",
+  "Theory & Algorithms",
+  "Systems & Architecture",
+  "Networks",
+  "Databases & Information Retrieval",
+  "Software Engineering",
+  "Human-Computer Interaction",
+  "Graphics & Visualization",
+  "Robotics",
+  "Signal Processing",
+  "Computational Biology & Health",
+  "Computing & Society",
+  "Other Computing"
+ ],
+ "subfields": {
+  "1702": "Artificial Intelligence",
+  "1710": "Databases & Information Retrieval",
+  "1705": "Networks",
+  "1707": "Computer Vision",
+  "1703": "Theory & Algorithms",
+  "1711": "Signal Processing",
+  "1708": "Systems & Architecture",
+  "1706": "Other Computing",
+  "1709": "Human-Computer Interaction",
+  "1704": "Graphics & Visualization",
+  "1712": "Software Engineering"
+ },
+ "topics": {
+  "T10181": {
+   "name": "Natural Language Processing Techniques",
+   "category": "Natural Language Processing"
+  },
+  "T13734": {
+   "name": "Advanced Computational Techniques and Applications",
+   "category": "Other Computing"
+  },
+  "T14430": {
+   "name": "Higher Education and Teaching Methods",
+   "category": null
+  },
+  "T10320": {
+   "name": "Neural Networks and Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T10054": {
+   "name": "Parallel Computing and Optimization Techniques",
+   "category": "Systems & Architecture"
+  },
+  "T13602": {
+   "name": "Educational Methods and Media Use",
+   "category": null
+  },
+  "T10715": {
+   "name": "Distributed and Parallel Computing Systems",
+   "category": "Systems & Architecture"
+  },
+  "T10028": {
+   "name": "Topic Modeling",
+   "category": "Natural Language Processing"
+  },
+  "T10400": {
+   "name": "Network Security and Intrusion Detection",
+   "category": "Security & Cryptography"
+  },
+  "T10211": {
+   "name": "Computational Drug Discovery Methods",
+   "category": "Computational Biology & Health"
+  },
+  "T10020": {
+   "name": "Quantum Information and Cryptography",
+   "category": "Quantum Computing"
+  },
+  "T10215": {
+   "name": "Semantic Web and Ontologies",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12157": {
+   "name": "Geochemistry and Geologic Mapping",
+   "category": null
+  },
+  "T10080": {
+   "name": "Energy Efficient Wireless Sensor Networks",
+   "category": "Networks"
+  },
+  "T10101": {
+   "name": "Cloud Computing and Resource Management",
+   "category": "Systems & Architecture"
+  },
+  "T10270": {
+   "name": "Blockchain Technology Applications and Security",
+   "category": "Security & Cryptography"
+  },
+  "T10586": {
+   "name": "Robotic Path Planning Algorithms",
+   "category": "Robotics"
+  },
+  "T10679": {
+   "name": "Service-Oriented Architecture and Web Services",
+   "category": "Software Engineering"
+  },
+  "T10531": {
+   "name": "Advanced Vision and Imaging",
+   "category": "Computer Vision"
+  },
+  "T10860": {
+   "name": "Speech and Audio Processing",
+   "category": "Signal Processing"
+  },
+  "T10260": {
+   "name": "Software Engineering Research",
+   "category": "Software Engineering"
+  },
+  "T11937": {
+   "name": "Research Data Management Practices",
+   "category": null
+  },
+  "T10682": {
+   "name": "Quantum Computing Algorithms and Architecture",
+   "category": "Quantum Computing"
+  },
+  "T10688": {
+   "name": "Image and Signal Denoising Methods",
+   "category": "Computer Vision"
+  },
+  "T10036": {
+   "name": "Advanced Neural Network Applications",
+   "category": "Computer Vision"
+  },
+  "T10273": {
+   "name": "IoT and Edge/Fog Computing",
+   "category": "Networks"
+  },
+  "T10331": {
+   "name": "Video Surveillance and Tracking Methods",
+   "category": "Computer Vision"
+  },
+  "T10575": {
+   "name": "Wireless Communication Networks Research",
+   "category": "Networks"
+  },
+  "T12564": {
+   "name": "Sensor Technology and Measurement Systems",
+   "category": "Other Computing"
+  },
+  "T10792": {
+   "name": "Matrix Theory and Algorithms",
+   "category": "Theory & Algorithms"
+  },
+  "T11122": {
+   "name": "Online Learning and Analytics",
+   "category": null
+  },
+  "T14254": {
+   "name": "Digital Media and Visual Art",
+   "category": null
+  },
+  "T10201": {
+   "name": "Speech Recognition and Synthesis",
+   "category": "Natural Language Processing"
+  },
+  "T10627": {
+   "name": "Advanced Image and Video Retrieval Techniques",
+   "category": "Computer Vision"
+  },
+  "T10246": {
+   "name": "Mobile Ad Hoc Networks",
+   "category": "Networks"
+  },
+  "T10764": {
+   "name": "Privacy-Preserving Technologies in Data",
+   "category": "Security & Cryptography"
+  },
+  "T11349": {
+   "name": "Music Technology and Sound Studies",
+   "category": "Signal Processing"
+  },
+  "T10317": {
+   "name": "Advanced Database Systems and Queries",
+   "category": "Databases & Information Retrieval"
+  },
+  "T11181": {
+   "name": "Advanced Data Storage Technologies",
+   "category": "Systems & Architecture"
+  },
+  "T12408": {
+   "name": "Educational Innovations and Challenges",
+   "category": null
+  },
+  "T12100": {
+   "name": "Advanced Mathematical Modeling in Engineering",
+   "category": "Other Computing"
+  },
+  "T14025": {
+   "name": "Educational Technology and Assessment",
+   "category": null
+  },
+  "T12863": {
+   "name": "Web and Library Services",
+   "category": null
+  },
+  "T10772": {
+   "name": "Distributed systems and fault tolerance",
+   "category": "Systems & Architecture"
+  },
+  "T10388": {
+   "name": "Advanced Steganography and Watermarking Techniques",
+   "category": "Security & Cryptography"
+  },
+  "T11106": {
+   "name": "Data Management and Algorithms",
+   "category": "Databases & Information Retrieval"
+  },
+  "T10430": {
+   "name": "Software Engineering Techniques and Practices",
+   "category": "Software Engineering"
+  },
+  "T11512": {
+   "name": "Anomaly Detection Techniques and Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T10796": {
+   "name": "Cooperative Communication and Network Coding",
+   "category": "Networks"
+  },
+  "T10904": {
+   "name": "Embedded Systems Design Techniques",
+   "category": "Systems & Architecture"
+  },
+  "T10734": {
+   "name": "Information and Cyber Security",
+   "category": "Security & Cryptography"
+  },
+  "T10138": {
+   "name": "Network Traffic and Congestion Control",
+   "category": "Networks"
+  },
+  "T10481": {
+   "name": "Computer Graphics and Visualization Techniques",
+   "category": "Graphics & Visualization"
+  },
+  "T14335": {
+   "name": "Educational Robotics and Engineering",
+   "category": null
+  },
+  "T10824": {
+   "name": "Image Retrieval and Classification Techniques",
+   "category": "Computer Vision"
+  },
+  "T10862": {
+   "name": "AI in cancer detection",
+   "category": "Computational Biology & Health"
+  },
+  "T10829": {
+   "name": "Interconnection Networks and Systems",
+   "category": "Systems & Architecture"
+  },
+  "T10237": {
+   "name": "Cryptography and Data Security",
+   "category": "Security & Cryptography"
+  },
+  "T11241": {
+   "name": "Advanced Malware Detection Techniques",
+   "category": "Security & Cryptography"
+  },
+  "T13832": {
+   "name": "Advanced Decision-Making Techniques",
+   "category": "Artificial Intelligence"
+  },
+  "T10126": {
+   "name": "Logic, programming, and type systems",
+   "category": "Programming Languages"
+  },
+  "T10538": {
+   "name": "Data Mining Algorithms and Applications",
+   "category": "Databases & Information Retrieval"
+  },
+  "T13565": {
+   "name": "Education and Learning Interventions",
+   "category": null
+  },
+  "T11813": {
+   "name": "Library Collection Development and Digital Resources",
+   "category": null
+  },
+  "T10057": {
+   "name": "Face and Expression Recognition",
+   "category": "Computer Vision"
+  },
+  "T10711": {
+   "name": "Target Tracking and Data Fusion in Sensor Networks",
+   "category": "Signal Processing"
+  },
+  "T10638": {
+   "name": "Optical measurement and interference techniques",
+   "category": null
+  },
+  "T10052": {
+   "name": "Medical Image Segmentation Techniques",
+   "category": "Computer Vision"
+  },
+  "T10444": {
+   "name": "Context-Aware Activity Recognition Systems",
+   "category": "Artificial Intelligence"
+  },
+  "T10901": {
+   "name": "Advanced Data Compression Techniques",
+   "category": "Signal Processing"
+  },
+  "T10533": {
+   "name": "Teaching and Learning Programming",
+   "category": "Computing & Society"
+  },
+  "T10142": {
+   "name": "Formal Methods in Verification",
+   "category": "Programming Languages"
+  },
+  "T11187": {
+   "name": "Nonlinear Dynamics and Pattern Formation",
+   "category": null
+  },
+  "T12203": {
+   "name": "Mobile Agent-Based Network Management",
+   "category": "Networks"
+  },
+  "T10648": {
+   "name": "Virtual Reality Applications and Impacts",
+   "category": "Human-Computer Interaction"
+  },
+  "T11309": {
+   "name": "Music and Audio Processing",
+   "category": "Signal Processing"
+  },
+  "T10203": {
+   "name": "Recommender Systems and Techniques",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12127": {
+   "name": "Software System Performance and Reliability",
+   "category": "Systems & Architecture"
+  },
+  "T11447": {
+   "name": "Blind Source Separation Techniques",
+   "category": "Signal Processing"
+  },
+  "T10249": {
+   "name": "Distributed Control Multi-Agent Systems",
+   "category": "Artificial Intelligence"
+  },
+  "T10100": {
+   "name": "Metaheuristic Optimization Algorithms Research",
+   "category": "Artificial Intelligence"
+  },
+  "T10714": {
+   "name": "Software-Defined Networks and 5G",
+   "category": "Networks"
+  },
+  "T10743": {
+   "name": "Software Testing and Debugging Techniques",
+   "category": "Software Engineering"
+  },
+  "T10888": {
+   "name": "Augmented Reality Applications",
+   "category": "Human-Computer Interaction"
+  },
+  "T11032": {
+   "name": "VLSI and Analog Circuit Testing",
+   "category": "Systems & Architecture"
+  },
+  "T10799": {
+   "name": "Data Visualization and Analytics",
+   "category": "Graphics & Visualization"
+  },
+  "T11269": {
+   "name": "Algorithms and Data Compression",
+   "category": "Theory & Algorithms"
+  },
+  "T12002": {
+   "name": "Computability, Logic, AI Algorithms",
+   "category": "Theory & Algorithms"
+  },
+  "T11130": {
+   "name": "Coding theory and cryptography",
+   "category": "Security & Cryptography"
+  },
+  "T10374": {
+   "name": "Advanced Graph Theory Research",
+   "category": "Theory & Algorithms"
+  },
+  "T10664": {
+   "name": "Sentiment Analysis and Opinion Mining",
+   "category": "Natural Language Processing"
+  },
+  "T13650": {
+   "name": "Computational Physics and Python Applications",
+   "category": "Other Computing"
+  },
+  "T10639": {
+   "name": "Advanced Software Engineering Methodologies",
+   "category": "Software Engineering"
+  },
+  "T12260": {
+   "name": "Educational Technology and Pedagogy",
+   "category": null
+  },
+  "T11689": {
+   "name": "Adversarial Robustness in Machine Learning",
+   "category": "Artificial Intelligence"
+  },
+  "T10601": {
+   "name": "Handwritten Text Recognition Techniques",
+   "category": "Computer Vision"
+  },
+  "T12016": {
+   "name": "Web Data Mining and Analysis",
+   "category": "Databases & Information Retrieval"
+  },
+  "T11448": {
+   "name": "Face recognition and analysis",
+   "category": "Computer Vision"
+  },
+  "T11017": {
+   "name": "Chaos-based Image/Signal Encryption",
+   "category": "Security & Cryptography"
+  },
+  "T10741": {
+   "name": "Video Coding and Compression Technologies",
+   "category": "Signal Processing"
+  },
+  "T11478": {
+   "name": "Caching and Content Delivery",
+   "category": "Networks"
+  },
+  "T11010": {
+   "name": "Logic, Reasoning, and Knowledge",
+   "category": "Artificial Intelligence"
+  },
+  "T10742": {
+   "name": "Peer-to-Peer Network Technologies",
+   "category": "Networks"
+  },
+  "T10812": {
+   "name": "Human Pose and Action Recognition",
+   "category": "Computer Vision"
+  },
+  "T11370": {
+   "name": "Mobile Learning in Education",
+   "category": null
+  },
+  "T10462": {
+   "name": "Reinforcement Learning in Robotics",
+   "category": "Robotics"
+  },
+  "T10828": {
+   "name": "Biometric Identification and Security",
+   "category": "Security & Cryptography"
+  },
+  "T11063": {
+   "name": "Rough Sets and Fuzzy Logic",
+   "category": "Artificial Intelligence"
+  },
+  "T14409": {
+   "name": "Educational Systems and Policies",
+   "category": null
+  },
+  "T14339": {
+   "name": "Image Processing and 3D Reconstruction",
+   "category": "Computer Vision"
+  },
+  "T11398": {
+   "name": "Hand Gesture Recognition Systems",
+   "category": "Human-Computer Interaction"
+  },
+  "T11439": {
+   "name": "Video Analysis and Summarization",
+   "category": "Computer Vision"
+  },
+  "T10820": {
+   "name": "Fuzzy Logic and Control Systems",
+   "category": "Artificial Intelligence"
+  },
+  "T11901": {
+   "name": "Bayesian Methods and Mixture Models",
+   "category": "Artificial Intelligence"
+  },
+  "T10545": {
+   "name": "Optimization and Variational Analysis",
+   "category": "Theory & Algorithms"
+  },
+  "T13386": {
+   "name": "Educational Methods and Teacher Development",
+   "category": null
+  },
+  "T11727": {
+   "name": "Advanced Algebra and Logic",
+   "category": "Theory & Algorithms"
+  },
+  "T11714": {
+   "name": "Multimodal Machine Learning Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T11303": {
+   "name": "Bayesian Modeling and Causal Inference",
+   "category": "Artificial Intelligence"
+  },
+  "T10803": {
+   "name": "Innovative Human-Technology Interaction",
+   "category": "Human-Computer Interaction"
+  },
+  "T12031": {
+   "name": "Speech and dialogue systems",
+   "category": "Natural Language Processing"
+  },
+  "T10933": {
+   "name": "Real-Time Systems Scheduling",
+   "category": "Systems & Architecture"
+  },
+  "T11307": {
+   "name": "Domain Adaptation and Few-Shot Learning",
+   "category": "Artificial Intelligence"
+  },
+  "T11019": {
+   "name": "Image Enhancement Techniques",
+   "category": "Computer Vision"
+  },
+  "T12171": {
+   "name": "Open Education and E-Learning",
+   "category": null
+  },
+  "T10456": {
+   "name": "Multi-Agent Systems and Negotiation",
+   "category": "Artificial Intelligence"
+  },
+  "T14516": {
+   "name": "English Language Learning and Teaching",
+   "category": null
+  },
+  "T11975": {
+   "name": "Evolutionary Algorithms and Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T12128": {
+   "name": "AI in Service Interactions",
+   "category": "Artificial Intelligence"
+  },
+  "T10579": {
+   "name": "Cognitive Radio Networks and Spectrum Sensing",
+   "category": "Networks"
+  },
+  "T11158": {
+   "name": "Wireless Networks and Protocols",
+   "category": "Networks"
+  },
+  "T11105": {
+   "name": "Advanced Image Processing Techniques",
+   "category": "Computer Vision"
+  },
+  "T13867": {
+   "name": "Economic Growth and Development",
+   "category": null
+  },
+  "T11276": {
+   "name": "Solar Radiation and Photovoltaics",
+   "category": null
+  },
+  "T10775": {
+   "name": "Generative Adversarial Networks and Image Synthesis",
+   "category": "Computer Vision"
+  },
+  "T13018": {
+   "name": "Seismology and Earthquake Studies",
+   "category": null
+  },
+  "T10996": {
+   "name": "Computational Geometry and Mesh Generation",
+   "category": "Graphics & Visualization"
+  },
+  "T14330": {
+   "name": "Library Science and Information Systems",
+   "category": null
+  },
+  "T11273": {
+   "name": "Advanced Graph Neural Networks",
+   "category": "Artificial Intelligence"
+  },
+  "T13083": {
+   "name": "Advanced Text Analysis Techniques",
+   "category": "Natural Language Processing"
+  },
+  "T11707": {
+   "name": "Gaze Tracking and Assistive Technology",
+   "category": "Human-Computer Interaction"
+  },
+  "T14042": {
+   "name": "Technology and Security Systems",
+   "category": "Security & Cryptography"
+  },
+  "T12205": {
+   "name": "Time Series Analysis and Forecasting",
+   "category": "Artificial Intelligence"
+  },
+  "T10906": {
+   "name": "AI-based Problem Solving and Planning",
+   "category": "Artificial Intelligence"
+  },
+  "T10848": {
+   "name": "Advanced Multi-Objective Optimization Algorithms",
+   "category": "Artificial Intelligence"
+  },
+  "T10789": {
+   "name": "Interactive and Immersive Displays",
+   "category": "Human-Computer Interaction"
+  },
+  "T14484": {
+   "name": "Technology and Data Analysis",
+   "category": "Other Computing"
+  },
+  "T11902": {
+   "name": "Intelligent Tutoring Systems and Adaptive Learning",
+   "category": "Artificial Intelligence"
+  },
+  "T11450": {
+   "name": "Model-Driven Software Engineering Techniques",
+   "category": "Software Engineering"
+  },
+  "T11321": {
+   "name": "Error Correcting Code Techniques",
+   "category": "Theory & Algorithms"
+  },
+  "T11034": {
+   "name": "Digital Filter Design and Implementation",
+   "category": "Signal Processing"
+  },
+  "T12799": {
+   "name": "Mobile and Web Applications",
+   "category": "Software Engineering"
+  },
+  "T11567": {
+   "name": "semigroups and automata theory",
+   "category": "Theory & Algorithms"
+  },
+  "T13194": {
+   "name": "ICT in Developing Communities",
+   "category": "Computing & Society"
+  },
+  "T11598": {
+   "name": "Internet Traffic Analysis and Secure E-voting",
+   "category": "Security & Cryptography"
+  },
+  "T11424": {
+   "name": "Security and Verification in Computing",
+   "category": "Security & Cryptography"
+  },
+  "T12262": {
+   "name": "Hate Speech and Cyberbullying Detection",
+   "category": "Natural Language Processing"
+  },
+  "T11644": {
+   "name": "Spam and Phishing Detection",
+   "category": "Security & Cryptography"
+  },
+  "T12423": {
+   "name": "Software Reliability and Analysis Research",
+   "category": "Software Engineering"
+  },
+  "T11574": {
+   "name": "Artificial Intelligence in Games",
+   "category": "Artificial Intelligence"
+  },
+  "T10951": {
+   "name": "Cryptographic Implementations and Security",
+   "category": "Security & Cryptography"
+  },
+  "T11165": {
+   "name": "Image and Video Quality Assessment",
+   "category": "Computer Vision"
+  },
+  "T12026": {
+   "name": "Explainable Artificial Intelligence (XAI)",
+   "category": "Artificial Intelligence"
+  },
+  "T12162": {
+   "name": "Cellular Automata and Applications",
+   "category": "Theory & Algorithms"
+  },
+  "T13523": {
+   "name": "Mathematics, Computing, and Information Processing",
+   "category": "Other Computing"
+  },
+  "T11697": {
+   "name": "Numerical Methods and Algorithms",
+   "category": "Theory & Algorithms"
+  },
+  "T13559": {
+   "name": "Edcuational Technology Systems",
+   "category": null
+  },
+  "T11614": {
+   "name": "Cloud Data Security Solutions",
+   "category": "Security & Cryptography"
+  },
+  "T11896": {
+   "name": "Opportunistic and Delay-Tolerant Networks",
+   "category": "Networks"
+  },
+  "T12519": {
+   "name": "Cybercrime and Law Enforcement Studies",
+   "category": "Computing & Society"
+  },
+  "T13913": {
+   "name": "Blockchain Technology in Education and Learning",
+   "category": null
+  },
+  "T14064": {
+   "name": "Organizational and Employee Performance",
+   "category": null
+  },
+  "T13155": {
+   "name": "Digital Communication and Language",
+   "category": null
+  },
+  "T13702": {
+   "name": "Machine Learning in Healthcare",
+   "category": "Computational Biology & Health"
+  },
+  "T12535": {
+   "name": "Machine Learning and Data Classification",
+   "category": "Artificial Intelligence"
+  },
+  "T11125": {
+   "name": "Petri Nets in System Modeling",
+   "category": "Theory & Algorithms"
+  },
+  "T11800": {
+   "name": "User Authentication and Security Systems",
+   "category": "Security & Cryptography"
+  },
+  "T12805": {
+   "name": "Cognitive Science and Mapping",
+   "category": null
+  },
+  "T10470": {
+   "name": "Usability and User Interface Design",
+   "category": "Human-Computer Interaction"
+  },
+  "T12797": {
+   "name": "History of Computing Technologies",
+   "category": "Computing & Society"
+  },
+  "T11435": {
+   "name": "Polynomial and algebraic computation",
+   "category": "Theory & Algorithms"
+  },
+  "T12072": {
+   "name": "Machine Learning and Algorithms",
+   "category": "Artificial Intelligence"
+  },
+  "T11550": {
+   "name": "Text and Document Classification Technologies",
+   "category": "Natural Language Processing"
+  },
+  "T12611": {
+   "name": "Neural Networks and Reservoir Computing",
+   "category": "Artificial Intelligence"
+  },
+  "T11675": {
+   "name": "Open Source Software Innovations",
+   "category": "Software Engineering"
+  },
+  "T11652": {
+   "name": "Imbalanced Data Classification Techniques",
+   "category": "Artificial Intelligence"
+  },
+  "T10931": {
+   "name": "Direction-of-Arrival Estimation Techniques",
+   "category": "Signal Processing"
+  },
+  "T13398": {
+   "name": "Data Analysis with R",
+   "category": "Other Computing"
+  },
+  "T13373": {
+   "name": "Data Mining and Machine Learning Applications",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12034": {
+   "name": "Digital and Cyber Forensics",
+   "category": "Security & Cryptography"
+  },
+  "T12536": {
+   "name": "Topological and Geometric Data Analysis",
+   "category": "Theory & Algorithms"
+  },
+  "T13836": {
+   "name": "Educational Research and Pedagogy",
+   "category": null
+  },
+  "T10720": {
+   "name": "Complexity and Algorithms in Graphs",
+   "category": "Theory & Algorithms"
+  },
+  "T10637": {
+   "name": "Advanced Clustering Algorithms Research",
+   "category": "Artificial Intelligence"
+  },
+  "T11596": {
+   "name": "Constraint Satisfaction and Optimization",
+   "category": "Artificial Intelligence"
+  },
+  "T13034": {
+   "name": "Information Systems Education and Curriculum Development",
+   "category": null
+  },
+  "T11605": {
+   "name": "Visual Attention and Saliency Detection",
+   "category": "Computer Vision"
+  },
+  "T12288": {
+   "name": "Optimization and Search Problems",
+   "category": "Theory & Algorithms"
+  },
+  "T14345": {
+   "name": "Scientific Research and Philosophical Inquiry",
+   "category": null
+  },
+  "T13016": {
+   "name": "Innovative Educational Technologies",
+   "category": null
+  },
+  "T11347": {
+   "name": "Neural Networks Stability and Synchronization",
+   "category": "Artificial Intelligence"
+  },
+  "T12549": {
+   "name": "Image and Object Detection Techniques",
+   "category": "Computer Vision"
+  },
+  "T11498": {
+   "name": "Security in Wireless Sensor Networks",
+   "category": "Security & Cryptography"
+  },
+  "T12874": {
+   "name": "Digital Imaging for Blood Diseases",
+   "category": "Computational Biology & Health"
+  },
+  "T12357": {
+   "name": "Digital Media Forensic Detection",
+   "category": "Security & Cryptography"
+  },
+  "T12216": {
+   "name": "Network Time Synchronization Technologies",
+   "category": "Networks"
+  },
+  "T12292": {
+   "name": "Graph Theory and Algorithms",
+   "category": "Theory & Algorithms"
+  },
+  "T12541": {
+   "name": "Graph Labeling and Dimension Problems",
+   "category": "Theory & Algorithms"
+  },
+  "T14246": {
+   "name": "E-Learning and Knowledge Management",
+   "category": null
+  },
+  "T12122": {
+   "name": "Physical Unclonable Functions (PUFs) and Hardware Security",
+   "category": "Security & Cryptography"
+  },
+  "T13851": {
+   "name": "Law, AI, and Intellectual Property",
+   "category": "Computing & Society"
+  },
+  "T11704": {
+   "name": "Mobile Crowdsensing and Crowdsourcing",
+   "category": "Networks"
+  },
+  "T12338": {
+   "name": "Digital literacy in education",
+   "category": null
+  },
+  "T12814": {
+   "name": "Gaussian Processes and Bayesian Inference",
+   "category": "Artificial Intelligence"
+  },
+  "T12801": {
+   "name": "Bluetooth and Wireless Communication Technologies",
+   "category": "Networks"
+  },
+  "T13999": {
+   "name": "Digital Rights Management and Security",
+   "category": "Security & Cryptography"
+  },
+  "T10286": {
+   "name": "Information Retrieval and Search Behavior",
+   "category": "Databases & Information Retrieval"
+  },
+  "T14387": {
+   "name": "Environmental Engineering and Cultural Studies",
+   "category": null
+  },
+  "T11504": {
+   "name": "Advanced Authentication Protocols Security",
+   "category": "Security & Cryptography"
+  },
+  "T12761": {
+   "name": "Data Stream Mining Techniques",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12131": {
+   "name": "Wireless Signal Modulation Classification",
+   "category": "Signal Processing"
+  },
+  "T11693": {
+   "name": "Cryptography and Residue Arithmetic",
+   "category": "Security & Cryptography"
+  },
+  "T14216": {
+   "name": "Multimedia Learning Systems",
+   "category": null
+  },
+  "T12879": {
+   "name": "Distributed Sensor Networks and Detection Algorithms",
+   "category": "Networks"
+  },
+  "T11612": {
+   "name": "Stochastic Gradient Optimization Techniques",
+   "category": "Artificial Intelligence"
+  },
+  "T14403": {
+   "name": "Educational Challenges and Innovations",
+   "category": null
+  },
+  "T12326": {
+   "name": "Network Packet Processing and Optimization",
+   "category": "Networks"
+  },
+  "T13673": {
+   "name": "Library Science and Information",
+   "category": null
+  },
+  "T12923": {
+   "name": "Digital Image Processing Techniques",
+   "category": "Computer Vision"
+  },
+  "T13623": {
+   "name": "Linguistic Studies and Language Acquisition",
+   "category": null
+  },
+  "T12601": {
+   "name": "Web Applications and Data Management",
+   "category": "Databases & Information Retrieval"
+  },
+  "T13924": {
+   "name": "Internet of Things and Social Network Interactions",
+   "category": "Networks"
+  },
+  "T14435": {
+   "name": "Information Retrieval and Data Mining",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12676": {
+   "name": "Machine Learning and ELM",
+   "category": "Artificial Intelligence"
+  },
+  "T12809": {
+   "name": "Contact Mechanics and Variational Inequalities",
+   "category": null
+  },
+  "T12380": {
+   "name": "Authorship Attribution and Profiling",
+   "category": "Natural Language Processing"
+  },
+  "T13983": {
+   "name": "Cybersecurity and Information Systems",
+   "category": "Security & Cryptography"
+  },
+  "T14351": {
+   "name": "Statistical and Computational Modeling",
+   "category": "Other Computing"
+  },
+  "T14413": {
+   "name": "Advanced Technologies in Various Fields",
+   "category": "Other Computing"
+  },
+  "T13629": {
+   "name": "Text Readability and Simplification",
+   "category": "Natural Language Processing"
+  },
+  "T13081": {
+   "name": "Digital Education and Society",
+   "category": null
+  },
+  "T13674": {
+   "name": "Computer Science and Engineering",
+   "category": "Other Computing"
+  },
+  "T13062": {
+   "name": "Cognitive Computing and Networks",
+   "category": "Artificial Intelligence"
+  },
+  "T13482": {
+   "name": "Engineering Education and Technology",
+   "category": null
+  },
+  "T14074": {
+   "name": "Persona Design and Applications",
+   "category": "Human-Computer Interaction"
+  },
+  "T12943": {
+   "name": "COVID-19 Digital Contact Tracing",
+   "category": "Computing & Society"
+  },
+  "T13197": {
+   "name": "Spreadsheets and End-User Computing",
+   "category": "Software Engineering"
+  },
+  "T13038": {
+   "name": "Internet of Things and AI",
+   "category": "Networks"
+  },
+  "T12469": {
+   "name": "Chaos, Complexity, and Education",
+   "category": null
+  },
+  "T12395": {
+   "name": "Educational Innovations and Technology",
+   "category": null
+  },
+  "T14215": {
+   "name": "Chemical and Environmental Engineering Research",
+   "category": null
+  },
+  "T12479": {
+   "name": "Web Application Security Vulnerabilities",
+   "category": "Security & Cryptography"
+  },
+  "T13904": {
+   "name": "Artificial Intelligence Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T14114": {
+   "name": "Digital Media and Philosophy",
+   "category": null
+  },
+  "T13182": {
+   "name": "Quantum-Dot Cellular Automata",
+   "category": "Systems & Architecture"
+  },
+  "T13976": {
+   "name": "Web visibility and informetrics",
+   "category": "Databases & Information Retrieval"
+  },
+  "T12794": {
+   "name": "Adaptive Dynamic Programming Control",
+   "category": "Artificial Intelligence"
+  },
+  "T14067": {
+   "name": "Cloud Computing and Remote Desktop Technologies",
+   "category": "Systems & Architecture"
+  },
+  "T13286": {
+   "name": "Modeling and Simulation Systems",
+   "category": "Other Computing"
+  },
+  "T13270": {
+   "name": "QR Code Applications and Technologies",
+   "category": "Other Computing"
+  },
+  "T13541": {
+   "name": "IoT-based Control Systems",
+   "category": "Networks"
+  },
+  "T13748": {
+   "name": "Advanced Statistical Modeling Techniques",
+   "category": "Other Computing"
+  },
+  "T13807": {
+   "name": "Cultural Insights and Digital Impacts",
+   "category": null
+  },
+  "T13615": {
+   "name": "Transportation Systems and Safety",
+   "category": null
+  },
+  "T13274": {
+   "name": "Expert finding and Q&A systems",
+   "category": "Databases & Information Retrieval"
+  },
+  "T13553": {
+   "name": "Age of Information Optimization",
+   "category": "Networks"
+  },
+  "T13681": {
+   "name": "Engineering and Information Technology",
+   "category": "Other Computing"
+  },
+  "T13579": {
+   "name": "Image and Video Stabilization",
+   "category": "Computer Vision"
+  },
+  "T14319": {
+   "name": "Currency Recognition and Detection",
+   "category": "Computer Vision"
+  },
+  "T13608": {
+   "name": "Advanced Computational Techniques in Science and Engineering",
+   "category": "Other Computing"
+  },
+  "T14353": {
+   "name": "Wireless Sensor Networks for Data Analysis",
+   "category": "Networks"
+  },
+  "T13935": {
+   "name": "Mathematical Control Systems and Analysis",
+   "category": "Other Computing"
+  },
+  "T13874": {
+   "name": "Information Architecture and Usability",
+   "category": "Human-Computer Interaction"
+  },
+  "T14347": {
+   "name": "Big Data and Digital Economy",
+   "category": "Other Computing"
+  },
+  "T13745": {
+   "name": "Media and Digital Communication",
+   "category": null
+  },
+  "T14431": {
+   "name": "Diverse Research and Applications",
+   "category": null
+  },
+  "T13693": {
+   "name": "Smart Systems and Machine Learning",
+   "category": "Artificial Intelligence"
+  },
+  "T13964": {
+   "name": "Educational Technology and Optimization",
+   "category": null
+  },
+  "T14414": {
+   "name": "Artificial Intelligence in Education",
+   "category": null
+  },
+  "T14519": {
+   "name": "Innovations in Education and Learning Technologies",
+   "category": null
+  },
+  "T13166": {
+   "name": "Information Science and Libraries",
+   "category": null
+  },
+  "T13873": {
+   "name": "Educational Methods and Technology",
+   "category": null
+  },
+  "T13647": {
+   "name": "AI and Big Data Applications",
+   "category": "Other Computing"
+  },
+  "T14155": {
+   "name": "Advanced Technology in Applications",
+   "category": "Other Computing"
+  },
+  "T13932": {
+   "name": "Education, Technology, and Economics",
+   "category": null
+  },
+  "T13567": {
+   "name": "AI and Multimedia in Education",
+   "category": null
+  },
+  "T14071": {
+   "name": "Healthcare during COVID-19 Pandemic",
+   "category": null
+  },
+  "T14175": {
+   "name": "Intuitionistic Fuzzy Systems Applications",
+   "category": "Artificial Intelligence"
+  },
+  "T14029": {
+   "name": "Thoreau and American Literature",
+   "category": null
+  },
+  "T14498": {
+   "name": "Educational Technology in Learning",
+   "category": null
+  },
+  "T14381": {
+   "name": "Psychiatry, Mental Health, Neuroscience",
+   "category": null
+  },
+  "T14100": {
+   "name": "Scientific Research and Technology",
+   "category": null
+  },
+  "T14455": {
+   "name": "Technology and Education Systems",
+   "category": null
+  },
+  "T14103": {
+   "name": "Educational Management and Quality",
+   "category": null
+  },
+  "T14098": {
+   "name": "Energy Efficiency in Computing",
+   "category": "Systems & Architecture"
+  },
+  "T14174": {
+   "name": "Artificial Intelligence and Decision Support Systems",
+   "category": "Artificial Intelligence"
+  },
+  "T14496": {
+   "name": "Educational Technology and E-Learning",
+   "category": null
+  },
+  "T13514": {
+   "name": "Experience-Based Knowledge Management",
+   "category": "Other Computing"
+  },
+  "T14307": {
+   "name": "Bioethics and Human Rights Issues",
+   "category": null
+  },
+  "T13898": {
+   "name": "Diverse Interdisciplinary Research Studies",
+   "category": null
+  },
+  "T13676": {
+   "name": "Educational and Technological Research",
+   "category": null
+  },
+  "T13345": {
+   "name": "Advanced Technologies and Applied Computing",
+   "category": "Other Computing"
+  }
+ }
+}

@@ -35,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import fetch  # noqa: E402
+import taxonomy  # noqa: E402
 from embed import Embedder, rows_done  # noqa: E402
 
 FILTER = "primary_topic.field.id:17,has_abstract:true,is_retracted:false,language:en"
@@ -143,6 +144,8 @@ class Ingest:
             "lastNewCheck": iso(s["last_new_check"]),
             "pendingWaiting": len(self.pending_ids()),
             "lastError": s["last_error"],
+            "excluded": s.get("excluded_rows", 0),
+            "relabel": s.get("relabel"),
         })
 
     def error(self, where: str, e: Exception):
@@ -163,7 +166,8 @@ class Ingest:
         return len(new)
 
     def openalex(self, params: dict) -> dict:
-        params = dict(params, select=fetch.SELECT)
+        select = params.pop("select_override", fetch.SELECT)
+        params = dict(params, select=select)
         if self.a.mailto:
             params["mailto"] = self.a.mailto
         if self.a.api_key:
@@ -301,20 +305,104 @@ class Ingest:
         due = force or new >= max(self.a.min_new, 0.1 * s["indexed_rows"]) or age >= self.a.build_every * 3600
         if not due:
             return
+        self.build(self.papers)
+        os.replace(self.index.with_suffix(".tmp.bin"), self.index)  # atomic: vecdb and the server switch on their own
+
+    def build(self, papers: Path):
+        """Build index.tmp.bin from `papers` + embeddings (the caller renames it into place)."""
+        s = self.state
         self.phase = "building index"
         self.status()
-        tmp = self.index.with_suffix(".tmp.bin")
         t = time.time()
-        cmd = [self.a.vecdb, "build", "--papers", str(self.papers), "--embeddings", str(self.emb_path),
-               "--dim", str(self.embedder.dim if self.embedder else 768), "--out", str(tmp)]
+        cmd = [self.a.vecdb, "build", "--papers", str(papers), "--embeddings", str(self.emb_path),
+               "--dim", str(self.embedder.dim if self.embedder else 768), "--out", str(self.index.with_suffix(".tmp.bin"))]
         log("building index: " + " ".join(cmd))
         subprocess.run(cmd, check=True)
-        os.replace(tmp, self.index)  # atomic: vecdb and the server switch to it on their own
         s["indexed_rows"] = self.embedded
         s["last_build"] = {"at": iso(now()), "finishedTs": now(), "rows": self.embedded,
                            "seconds": round(time.time() - t, 1)}
         self.save_state()
         log(f"index rebuilt with {self.embedded} papers in {time.time() - t:.0f}s")
+
+    # ---- relabelling (after taxonomy.json changes) ----
+
+    def relabel(self):
+        """Re-fetch the OpenAlex topic of every stored paper, relabel it with our categories,
+        mark papers outside computer science as excluded, and swap in the new papers.jsonl
+        together with an index built from it. Runs once per taxonomy version; resumable (topics
+        are cached in topics-cache.jsonl as they arrive)."""
+        s = self.state
+        if s.get("taxonomy_version") == taxonomy.VERSION:
+            return
+        if self.lines == 0:
+            s["taxonomy_version"] = taxonomy.VERSION
+            self.save_state()
+            return
+        d = self.papers.parent
+        cache_path = d / "topics-cache.jsonl"
+        cache: dict[str, dict | None] = {}
+        if cache_path.exists():
+            for line in open(cache_path, encoding="utf-8"):
+                try:
+                    e = json.loads(line)
+                    cache[e["id"]] = e["primary_topic"]
+                except (json.JSONDecodeError, KeyError):
+                    pass  # partial last line after a crash
+        ids = [json.loads(line)["id"] for line in open(self.papers, encoding="utf-8")]
+        todo = [i for i in ids if i not in cache]
+        log(f"relabel (taxonomy v{taxonomy.VERSION}): {len(ids):,} papers, {len(todo):,} topics to fetch")
+        self.phase = "relabelling papers"
+        with open(cache_path, "a", encoding="utf-8") as out:
+            for b in range(0, len(todo), 50):
+                if self.stop:
+                    return
+                chunk = todo[b : b + 50]
+                res = self.openalex({"filter": "openalex_id:" + "|".join(chunk), "per-page": "50",
+                                     "select_override": "id,primary_topic"})
+                got = {w["id"].rsplit("/", 1)[-1]: w.get("primary_topic") for w in res["results"]}
+                for wid in chunk:  # works OpenAlex no longer returns (merged/deleted): keep as they are
+                    cache[wid] = got.get(wid)
+                    out.write(json.dumps({"id": wid, "primary_topic": cache[wid]}) + "\n")
+                out.flush()
+                s["relabel"] = {"done": len(ids) - len(todo) + b + len(chunk), "total": len(ids)}
+                if (b // 50) % 20 == 0:
+                    self.status()
+                    log(f"relabel: {s['relabel']['done']:,} / {len(ids):,} topics fetched")
+
+        requested = set()
+        if self.pending.exists():
+            for line in open(self.pending, encoding="utf-8"):
+                try:
+                    requested.add(json.loads(line).get("id"))
+                except json.JSONDecodeError:
+                    pass
+        tmp = self.papers.with_suffix(".relabel.jsonl")
+        excluded = 0
+        with open(self.papers, encoding="utf-8") as f, open(tmp, "w", encoding="utf-8") as out:
+            for line in f:
+                row = json.loads(line)
+                pt = cache.get(row["id"])
+                if pt:
+                    row.pop("excluded", None)
+                    labels = taxonomy.fields(pt)
+                    if labels.get("excluded") and row["id"] in requested:
+                        del labels["excluded"]  # a user asked for it: keep it, labelled with its field
+                        labels["field"] = (pt.get("field") or {}).get("display_name") or "Other"
+                    row.update(labels)
+                excluded += bool(row.get("excluded"))
+                out.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Build the index against the relabelled file, then swap both. Same lines in the same
+        # order, so embeddings.f32 stays aligned; excluded papers are simply left out of the index.
+        self.build(tmp)
+        os.replace(tmp, self.papers)
+        os.replace(self.index.with_suffix(".tmp.bin"), self.index)
+        self.cursor = (0, 0)  # byte offsets changed
+        s["taxonomy_version"] = taxonomy.VERSION
+        s["excluded_rows"] = excluded
+        s.pop("relabel", None)
+        self.save_state()
+        cache_path.unlink(missing_ok=True)
+        log(f"relabel done: {excluded:,} of {len(ids):,} papers are outside computer science and left out of the index")
 
     # ---- main loop ----
 
@@ -322,6 +410,12 @@ class Ingest:
         e_dim = 768
         self.embedded = rows_done(self.emb_path, e_dim) if self.emb_path.exists() else 0
         log(f"starting: {self.lines} papers fetched, {self.embedded} embedded, {self.state['indexed_rows']} indexed")
+        while not self.stop and self.state.get("taxonomy_version") != taxonomy.VERSION:
+            try:
+                self.relabel()
+            except Exception as ex:
+                self.error("relabel", ex)
+                time.sleep(60)
         while not self.stop:
             worked = False
             for name, step in (("pending", self.fetch_pending), ("backfill", self.maybe_backfill), ("new", self.maybe_new)):

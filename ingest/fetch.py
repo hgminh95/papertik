@@ -32,6 +32,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+import taxonomy  # noqa: E402
+
 CS_FIELD = "17"
 API = "https://api.openalex.org/works"
 SELECT = ",".join(
@@ -87,6 +90,12 @@ def convert(w: dict, require_cs: bool = True) -> dict | None:
     topic = w.get("primary_topic") or {}
     if require_cs and not str((topic.get("field") or {}).get("id", "")).endswith("/" + CS_FIELD):
         return None
+    labels = taxonomy.fields(topic)
+    if labels.get("excluded"):
+        if require_cs:
+            return None  # filed under CS by OpenAlex but not CS (education, geology, ...)
+        del labels["excluded"]  # a user asked for this paper: keep it, labelled
+        labels["field"] = (topic.get("field") or {}).get("display_name") or "Other"
     loc = w.get("primary_location") or {}
     oa = w.get("best_oa_location") or {}
     authors = [
@@ -101,7 +110,7 @@ def convert(w: dict, require_cs: bool = True) -> dict | None:
         "authors": authors[:20],
         "year": w.get("publication_year") or 0,
         "venue": ((loc.get("source") or {}).get("display_name")) or "",
-        "field": (topic.get("subfield") or {}).get("display_name") or "",
+        **labels,  # field (our category), topic, topic_id
         "doi": w.get("doi") or "",
         "url": loc.get("landing_page_url") or "",
         "pdf_url": oa.get("pdf_url") or "",
