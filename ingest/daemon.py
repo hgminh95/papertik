@@ -40,6 +40,7 @@ from embed import Embedder, rows_done  # noqa: E402
 from searchindex import SearchIndex  # noqa: E402
 
 FILTER = "primary_topic.field.id:17,has_abstract:true,is_retracted:false,language:en"
+BATCH = 100  # works per lookup request: OpenAlex's maximum for an openalex_id filter
 DAY = 86400
 
 
@@ -221,9 +222,9 @@ class Ingest:
     def fetch_pending(self) -> int:
         ids = self.pending_ids()[:200]
         added = 0
-        for i in range(0, len(ids), 50):
-            chunk = ids[i : i + 50]
-            res = self.openalex({"filter": "openalex_id:" + "|".join(chunk), "per-page": "50"})
+        for i in range(0, len(ids), BATCH):
+            chunk = ids[i : i + BATCH]
+            res = self.openalex({"filter": "openalex_id:" + "|".join(chunk), "per-page": str(BATCH)})
             rows = [r for r in (fetch.convert(w, require_cs=False) for w in res["results"]) if r]
             added += self.append(rows)
             for wid in chunk:  # not found / filtered out: retry in a week
@@ -404,11 +405,11 @@ class Ingest:
         log(f"relabel (taxonomy v{taxonomy.VERSION}): {len(ids):,} papers, {len(todo):,} topics to fetch")
         self.phase = "relabelling papers"
         with open(cache_path, "a", encoding="utf-8") as out:
-            for b in range(0, len(todo), 50):
+            for b in range(0, len(todo), BATCH):
                 if self.stop:
                     return
-                chunk = todo[b : b + 50]
-                res = self.openalex({"filter": "openalex_id:" + "|".join(chunk), "per-page": "50",
+                chunk = todo[b : b + BATCH]
+                res = self.openalex({"filter": "openalex_id:" + "|".join(chunk), "per-page": str(BATCH),
                                      "select_override": "id,primary_topic"})
                 got = {w["id"].rsplit("/", 1)[-1]: w.get("primary_topic") for w in res["results"]}
                 for wid in chunk:  # works OpenAlex no longer returns (merged/deleted): keep as they are
@@ -416,7 +417,7 @@ class Ingest:
                     out.write(json.dumps({"id": wid, "primary_topic": cache[wid]}) + "\n")
                 out.flush()
                 s["relabel"] = {"done": len(ids) - len(todo) + b + len(chunk), "total": len(ids)}
-                if (b // 50) % 20 == 0:
+                if (b // BATCH) % 10 == 0:
                     self.status()
                     log(f"relabel: {s['relabel']['done']:,} / {len(ids):,} topics fetched")
 
