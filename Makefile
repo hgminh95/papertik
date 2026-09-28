@@ -11,7 +11,7 @@ vecdb:
 	cd vecdb && $(CARGO) build --release
 
 server:
-	cd server && go build -o bin/server .
+	cd server && go build -tags sqlite_fts5 -o bin/server .
 
 web:
 	cd web && npm install --no-audit --no-fund && npm run build
@@ -40,7 +40,7 @@ dev:
 
 test:
 	cd vecdb && $(CARGO) test --release
-	cd server && go vet ./... && go test ./...
+	cd server && go vet -tags sqlite_fts5 ./... && go test -tags sqlite_fts5 ./...
 	cd web && npm run check
 
 clean:

@@ -3,6 +3,8 @@ package web
 import (
 	"os"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -56,5 +58,50 @@ func TestFTSLatency(t *testing.T) {
 			}
 			t.Logf("sort=%-6q %-36q %5d%s matches  median %v", sortBy, q, res.total, plus, times[1].Round(time.Millisecond))
 		}
+	}
+}
+
+// Throughput with many concurrent searches, cache off:
+// PAPERTOK_FTS_BENCH=/path/to/search.db go test -run FTSThroughput -v
+func TestFTSThroughput(t *testing.T) {
+	path := os.Getenv("PAPERTOK_FTS_BENCH")
+	if path == "" {
+		t.Skip("set PAPERTOK_FTS_BENCH to a search.db")
+	}
+	// A realistic mix: mostly relevance, some "most cited"; common words, specific topics, names.
+	queries := []struct{ q, sort string }{
+		{"learning", ""}, {"graph neural networks", ""}, {"compiler optimization", ""},
+		{"zero knowledge proof", ""}, {"reinforcement learning robot", ""}, {"image segmentation", "cited"},
+		{"distributed consensus protocol", ""}, {"network", "cited"}, {"type inference", ""},
+		{"author", ""}, {"deep learning image classification", ""}, {"query optimization database", "recent"},
+	}
+	for _, workers := range []int{1, 8, 32} {
+		f := &ftsIndex{path: path, cache: map[string]ftsResult{}}
+		var done atomic.Int64
+		var latSum atomic.Int64
+		stop := time.Now().Add(8 * time.Second)
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				for i := w; time.Now().Before(stop); i++ {
+					q := queries[i%len(queries)]
+					start := time.Now()
+					f.mu.Lock()
+					clear(f.cache) // measure real work, not the cache
+					f.mu.Unlock()
+					if _, err := f.search(q.q, q.sort, 1); err != nil {
+						t.Error(err)
+						return
+					}
+					latSum.Add(int64(time.Since(start)))
+					done.Add(1)
+				}
+			}(w)
+		}
+		wg.Wait()
+		n := done.Load()
+		t.Logf("%2d concurrent: %6.1f searches/s, avg %v", workers, float64(n)/8, (time.Duration(latSum.Load()) / time.Duration(max(n, 1))).Round(time.Millisecond))
 	}
 }

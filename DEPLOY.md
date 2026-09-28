@@ -86,7 +86,9 @@ make build test
 ```
 
 `vecdb` picks its SIMD kernel at runtime (AVX2 on x86), so the same binary works on any modern
-x86 server. Install:
+x86 server. The web server links C SQLite for search (cgo), so building it needs `gcc`, which
+`build-essential` from step 2 provides; always build it with `make server` (it adds the
+`sqlite_fts5` tag). Install:
 
 ```sh
 sudo mkdir -p /opt/papertok/{bin,data,web}

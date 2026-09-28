@@ -68,9 +68,10 @@ each stored paper's topic once and swaps in the result.
 each index build (and when papers are excluded). It stores only what is needed to match and
 rank words (no text), leaves out very common words, and ranks with BM25 (title matches 10x,
 authors 3x, abstract 1x) plus a small citation tiebreak; titles are searched first through a
-separate small title index, which keeps common words fast. Measured on 1M papers: ~5-35 ms for
-specific queries, ~75 ms for a single common word; the index is ~0.7 GB per million papers. The
-server reads it with a pure-Go SQLite driver, so the build still needs no C toolchain.
+separate small title index, which keeps common words fast. Measured on 1M papers (with results caching off): 2-90 ms per query, ~140 searches/s on 8
+cores; the index is ~0.7 GB per million papers. The
+server uses the C SQLite driver (`github.com/mattn/go-sqlite3`, cgo, built with
+`-tags sqlite_fts5`; `make server` does this), which is ~2.5x faster than a pure-Go SQLite here.
 
 `ingest/fetch.py` and `ingest/embed.py` still work on their own for one-off jobs (e.g. embedding
 on a GPU machine).
