@@ -1,4 +1,4 @@
-// Command server is the PaperTok HTTP server.
+// Command server is the PaperTik HTTP server.
 package main
 
 import (

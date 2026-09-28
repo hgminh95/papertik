@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 #[derive(Parser)]
-#[command(about = "PaperTok vector database")]
+#[command(about = "PaperTik vector database")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

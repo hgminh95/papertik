@@ -59,11 +59,11 @@ func (h *indexHTML) get(path string) ([]byte, error) {
 	return h.body, nil
 }
 
-var paperHead = template.Must(template.New("head").Parse(`<title>{{.Title}} · PaperTok</title>
+var paperHead = template.Must(template.New("head").Parse(`<title>{{.Title}} · PaperTik</title>
     <meta name="description" content="{{.Description}}" />
     <link rel="canonical" href="{{.URL}}" />
     <meta property="og:type" content="article" />
-    <meta property="og:site_name" content="PaperTok" />
+    <meta property="og:site_name" content="PaperTik" />
     <meta property="og:title" content="{{.Title}}" />
     <meta property="og:description" content="{{.Description}}" />
     <meta property="og:url" content="{{.URL}}" />
@@ -81,7 +81,7 @@ var paperBody = template.Must(template.New("body").Parse(`<article id="seo" clas
       <h1>{{.Title}}</h1>
       <p>{{.Byline}}</p>
       <p>{{.Abstract}}</p>
-      <p><a href="{{.Link}}">Read the paper</a> · <a href="/">More papers on PaperTok</a></p>
+      <p><a href="{{.Link}}">Read the paper</a> · <a href="/">More papers on PaperTik</a></p>
     </article>`))
 
 // GET /p/{id}: a shareable, indexable page for one paper; the SPA takes over once loaded.

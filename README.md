@@ -1,6 +1,9 @@
-# PaperTok
+# PaperTik
 
-Source: https://github.com/hgminh95/papertok
+Source: https://github.com/hgminh95/papertok · Live: https://papertik.app
+
+(The project was renamed from PaperTok to PaperTik; the repository, binaries, services and paths
+keep the original `papertok` name.)
 
 TikTok for computer-science papers. Swipe, double-tap what you'd read, and the feed
 learns. Design notes are in [PLAN.md](PLAN.md).
@@ -124,7 +127,7 @@ stateless).
    TURNSTILE_SECRET=0x4AAAA...
    SESSION_KEY=<openssl rand -hex 32>
    OPENALEX_API_KEY=...   # optional; anonymous OpenAlex search is heavily rate-limited
-   PUBLIC_URL=https://papertok.example.com   # canonical links, sitemap, share previews
+   PUBLIC_URL=https://papertik.app   # canonical links, sitemap, share previews
    ```
    The SPA runs the challenge once, `POST /api/session` verifies it server-side and sets a
    signed 24 h cookie, and `/api/feed` rejects requests without it.

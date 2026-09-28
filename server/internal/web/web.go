@@ -32,7 +32,7 @@ type Config struct {
 	PendingPath      string // where to log papers to ingest later (empty = don't log)
 	IndexPath        string // index.bin; watched, and reloaded when a new build replaces it
 	PapersPath       string // papers.jsonl (append-only; the index points into it)
-	PublicURL        string // e.g. https://papertok.example.com, for canonical links and sitemaps (default: from the request)
+	PublicURL        string // e.g. https://papertik.app, for canonical links and sitemaps (default: from the request)
 }
 
 type Server struct {

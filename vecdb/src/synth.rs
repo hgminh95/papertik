@@ -169,7 +169,7 @@ pub fn generate_index(n: usize, dim: usize, n_topics: usize, out_dir: &Path, see
                         let row = serde_json::json!({
                             "id": format!("W{}", 1_000_000 + i),
                             "title": title,
-                            "abstract": format!("Synthetic paper #{i} in {field}, subtopic {s}. Used to measure PaperTok at full-corpus scale."),
+                            "abstract": format!("Synthetic paper #{i} in {field}, subtopic {s}. Used to measure PaperTik at full-corpus scale."),
                             "authors": [format!("{} {}", rng.pick(FIRST), rng.pick(LAST))],
                             "year": 2000 + (rng.next_u64() % 26),
                             "venue": rng.pick(VENUES),

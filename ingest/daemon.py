@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["numpy", "torch", "transformers>=4.40"]
 # ///
-"""PaperTok ingest service: leave it running and the index fills up and stays current.
+"""PaperTik ingest service: leave it running and the index fills up and stays current.
 
 One loop, forever:
   1. papers users liked/saved/opened that are not indexed yet (pending.jsonl, from the server)

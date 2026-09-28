@@ -1,4 +1,4 @@
-# PaperTok — Plan
+# PaperTik — Plan
 
 TikTok-style vertical feed of computer-science papers. Every swipe shows one
 paper; liking a paper moves the user's taste vector toward it; the next batch

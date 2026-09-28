@@ -43,8 +43,21 @@
     paper.reason === 'for-you' ? 'For you' : paper.reason === 'explore' ? 'Something different' : paper.reason === 'search' || paper.reason === 'shared' ? 'Shared paper' : 'Fresh pick',
   )
 
+  // Double-tap to like is a touch gesture. With a mouse, double-click means "select this word"
+  // (and text must stay copyable), so on desktop liking is the button or the L key.
+  let downAt = { x: 0, y: 0 }
+  function onpointerdown(e: PointerEvent) {
+    downAt = { x: e.clientX, y: e.clientY }
+  }
+
   function onpointerup(e: PointerEvent) {
-    if ((e.target as HTMLElement).closest('button, a')) return
+    if (e.pointerType !== 'touch' || (e.target as HTMLElement).closest('button, a')) return
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 12 // a swipe or drag, not a tap
+    const selecting = (window.getSelection()?.toString() ?? '') !== '' // long-press text selection
+    if (moved || selecting) {
+      lastTap = 0
+      return
+    }
     const now = performance.now()
     if (now - lastTap < 300) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -60,7 +73,7 @@
 
 </script>
 
-<article class="card" {onpointerup}>
+<article class="card" {onpointerdown} {onpointerup}>
   <div class="content">
     <div class="meta">
       <span class="chip">{badge}</span>
@@ -140,10 +153,15 @@
     background:
       radial-gradient(120% 80% at 10% 0%, var(--glow) 0%, transparent 60%),
       var(--bg);
-    user-select: none;
-    -webkit-user-select: none;
     touch-action: manipulation;
     overflow: hidden;
+  }
+  /* Text is selectable (to copy a title or a quote); the controls are not. */
+  .rail,
+  .meta,
+  .more {
+    user-select: none;
+    -webkit-user-select: none;
   }
   .content {
     flex: 1;
@@ -153,6 +171,9 @@
     flex-direction: column;
     gap: 10px;
     max-height: 100%;
+  }
+  .content > :not(.abstract) {
+    flex-shrink: 0;
   }
   .meta {
     display: flex;
@@ -189,10 +210,13 @@
     font-size: 13px;
     margin: 0;
   }
+  /* The abstract takes whatever height is free and shrinks (showing "More") only when the whole
+     card would not fit. Phones cap it so the card stays bottom-weighted, as in TikTok. */
   .abstract {
     position: relative;
     overflow: hidden;
-    max-height: min(38dvh, 15.5em);
+    flex: 0 1 auto;
+    min-height: 3em;
     font-size: 15px;
     line-height: 1.55;
     color: var(--fg-soft);
@@ -203,12 +227,16 @@
   .abstract p {
     margin: 0;
   }
+  @media (max-width: 700px) {
+    .abstract {
+      max-height: min(45dvh, 16em);
+    }
+  }
   .abstract.expanded {
-    max-height: 50vh;
+    max-height: none;
+    flex-shrink: 1;
     overflow-y: auto;
     mask-image: none;
-    user-select: text;
-    -webkit-user-select: text;
   }
   .more {
     align-self: flex-start;

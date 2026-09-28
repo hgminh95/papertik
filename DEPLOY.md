@@ -1,6 +1,6 @@
-# Deploying PaperTok (Hetzner + Cloudflare)
+# Deploying PaperTik (Hetzner + Cloudflare)
 
-This guide takes PaperTok from an empty server to a public site. The shape of the deployment:
+This guide takes PaperTik from an empty server to a public site. The shape of the deployment:
 
 ```
 visitor ──HTTPS──▶ Cloudflare edge ──(Cloudflare Tunnel, outbound from the server)──┐
@@ -16,7 +16,7 @@ visitor ──HTTPS──▶ Cloudflare edge ──(Cloudflare Tunnel, outbound 
                                └─────────────────────────────────────────────────────┘
 ```
 
-Commands assume Ubuntu 24.04 and a domain you control (written `papertok.example.com`).
+Commands assume Ubuntu 24.04 and the domain `papertik.app`.
 
 ---
 
@@ -109,7 +109,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/
 sudo cp -r ~/papertok/ingest /opt/papertok/
 sudo cp ~/papertok/deploy/papertok-*.service /etc/systemd/system/
 sudo tee /etc/papertok.env >/dev/null <<ENV
-PUBLIC_URL=https://papertok.example.com
+PUBLIC_URL=https://papertik.app
 SESSION_KEY=$(openssl rand -hex 32)
 TURNSTILE_SITEKEY=
 TURNSTILE_SECRET=
@@ -167,7 +167,7 @@ sudo apt update && sudo apt install -y cloudflared
 sudo cloudflared service install <TOKEN-FROM-THE-DASHBOARD>
 ```
 
-Then add a **public hostname**: `papertok.example.com` → service `http://127.0.0.1:8080`.
+Then add a **public hostname**: `papertik.app` → service `http://127.0.0.1:8080`.
 (`deploy/cloudflared.yml` is the equivalent config if you prefer a locally-managed tunnel.)
 
 The Go server trusts `CF-Connecting-IP` only when the TCP peer is loopback, which is exactly
@@ -182,7 +182,7 @@ the tunnel. Per-IP rate limiting (5 req/s, burst 20 on `/api/*`) therefore sees 
 - **Security → WAF → Managed rules**: enable the Cloudflare managed ruleset if your plan has it.
 
 ### 5.4 Turnstile
-**Turnstile → Add widget**: hostname `papertok.example.com`, mode *Managed* (or *Invisible*).
+**Turnstile → Add widget**: hostname `papertik.app`, mode *Managed* (or *Invisible*).
 Put the site key and secret into `/etc/papertok.env` and restart the server. The app runs the
 challenge once per visitor, exchanges it for a signed 24-hour cookie, and `/api/*` data
 endpoints reject requests without it. Crawlers never need it: paper pages (`/p/…`), the sitemap
@@ -202,7 +202,7 @@ With these, crawler traffic on paper pages mostly stops at the edge.
 ## 6. Search engines
 
 1. **Google Search Console** → add a *Domain* property (verify with a DNS TXT record in
-   Cloudflare) → **Sitemaps** → submit `https://papertok.example.com/sitemap.xml`.
+   Cloudflare) → **Sitemaps** → submit `https://papertik.app/sitemap.xml`.
 2. Do the same in **Bing Webmaster Tools** (it can import from Search Console).
 3. Test a paper URL with the *URL Inspection* tool and the
    [Rich Results Test](https://search.google.com/test/rich-results) (the page carries
@@ -213,7 +213,7 @@ came in on.
 
 ## 7. Operations
 
-**Status page.** `https://papertok.example.com/#/status` (also linked at the bottom of the
+**Status page.** `https://papertik.app/#/status` (also linked at the bottom of the
 sidebar): requests/s, feed latency, papers indexed, the ingest queue and backfill progress,
 vecdb load. It is public, like the rest of the site.
 

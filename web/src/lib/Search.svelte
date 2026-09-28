@@ -160,7 +160,7 @@
     {#if source === 'local'}
       <p class="fallback" role="status">
         OpenAlex search is unavailable right now (it rate-limits anonymous search), so these are matches from the
-        PaperTok index only.
+        PaperTik index only.
       </p>
     {/if}
     <p class="count">{total.toLocaleString()} result{total === 1 ? '' : 's'} for “{submitted}”</p>

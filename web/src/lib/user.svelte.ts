@@ -296,7 +296,7 @@ export function reset() {
 // ---- export / import ----
 
 export function exportData(): string {
-  return JSON.stringify({ app: 'papertok', version: 1, exportedAt: new Date().toISOString(), ...$state.snapshot(user) }, null, 2)
+  return JSON.stringify({ app: 'papertik', version: 1, exportedAt: new Date().toISOString(), ...$state.snapshot(user) }, null, 2)
 }
 
 /** Replace local state with an export. Throws with a readable message if the file is not ours. */
@@ -307,7 +307,7 @@ export function importData(text: string, dim: number) {
   } catch {
     throw new Error('That file is not valid JSON.')
   }
-  if (data.app !== 'papertok') throw new Error('That file is not a PaperTok export.')
+  if (data.app !== 'papertik' && data.app !== 'papertok') throw new Error('That file is not a PaperTik export.') // papertok: exports made before the rename
   const next = empty()
   const checkPref = (b64: string) => {
     let v: Float32Array

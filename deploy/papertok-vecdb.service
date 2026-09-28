@@ -1,5 +1,5 @@
 [Unit]
-Description=PaperTok vector database (shared-memory server)
+Description=PaperTik vector database (shared-memory server)
 After=network.target
 
 [Service]

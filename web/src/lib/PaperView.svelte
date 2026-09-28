@@ -24,7 +24,7 @@
     !detail
       ? ''
       : !detail.seed
-        ? 'This paper is not in the PaperTok index yet, and none of its related papers are either. It has been queued for indexing.'
+        ? 'This paper is not in the PaperTik index yet, and none of its related papers are either. It has been queued for indexing.'
         : detail.seedBasis > 0
           ? `This paper is not indexed yet (it has been queued), so these picks come from ${detail.seedBasis} related paper${detail.seedBasis === 1 ? '' : 's'} that are.`
           : "That's everything close to this paper.",

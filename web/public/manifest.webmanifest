@@ -1,6 +1,6 @@
 {
-  "name": "PaperTok",
-  "short_name": "PaperTok",
+  "name": "PaperTik",
+  "short_name": "PaperTik",
   "description": "Swipe through computer science papers. Like what you enjoy; the feed learns.",
   "start_url": "/",
   "display": "standalone",

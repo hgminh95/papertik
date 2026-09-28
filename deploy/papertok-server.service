@@ -1,5 +1,5 @@
 [Unit]
-Description=PaperTok HTTP server
+Description=PaperTik HTTP server
 After=network.target papertok-vecdb.service
 Wants=papertok-vecdb.service
 
