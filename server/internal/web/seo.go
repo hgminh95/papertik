@@ -21,7 +21,9 @@ import (
 // title, description, Open Graph / Twitter tags, JSON-LD and a readable copy of the abstract.
 // robots.txt and a sitemap (split into files of 50k URLs, the protocol limit) cover the index.
 
-const sitemapChunk = 50_000
+// Papers per sitemap file. The protocol allows 50,000 URLs per file, and the first file also
+// lists the home page.
+const sitemapChunk = 49_999
 
 // baseURL is the public origin used in canonical links and sitemaps.
 func (s *Server) baseURL(r *http.Request) string {

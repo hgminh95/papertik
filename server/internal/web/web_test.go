@@ -79,3 +79,9 @@ func TestLimiter(t *testing.T) {
 		t.Fatal("other client limited")
 	}
 }
+
+func TestSitemapChunkWithinProtocolLimit(t *testing.T) {
+	if sitemapChunk+1 > 50_000 { // +1: the home page in the first file
+		t.Fatalf("sitemap files would hold %d URLs; the limit is 50,000", sitemapChunk+1)
+	}
+}
