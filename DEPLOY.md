@@ -28,6 +28,7 @@ What the full corpus (8.3M English CS papers with abstracts) needs:
 |---|---|
 | index (`index.bin`) | 6.6 GB (int8 vectors + IVF clusters), memory-mapped; must stay in RAM |
 | metadata (`papers.jsonl`) | ~12 GB; read per request, ideally in the page cache |
+| search index (`search.db`) | ~5-6 GB on disk at 8M papers; hot parts in the page cache |
 | Go server | ~0.6 GB (id map, Discover lists) |
 | building the index | ~7 GB RAM while `vecdb build` runs, plus 4-5 minutes of all cores (k-means) |
 | CPU | vector search is pure integer SIMD; more physical cores = more requests/s |
@@ -266,6 +267,10 @@ sudo systemctl restart papertok-ingest             # safe at any time; it resume
 
 The service's settings (queue size, rebuild interval, how often to check for new papers) are
 flags of `ingest/daemon.py`; see `--help`.
+
+**Search index.** `data/search.db` is rebuilt from `papers.jsonl` if deleted: stop
+`papertok-ingest`, remove `search.db*`, start it again; it re-adds every indexed paper (roughly
+1-2 minutes per million papers).
 
 **Backups.** Everything in `data/` can be rebuilt from OpenAlex, but re-embedding takes days on
 a CPU, so keep a copy of `papers.jsonl` + `embeddings.f32` + `ingest-state.json` somewhere

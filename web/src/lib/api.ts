@@ -116,7 +116,7 @@ export async function search(
   q: string,
   page = 1,
   sort: SearchSort = '',
-): Promise<{ papers: Paper[]; total: number; page: number; source: 'openalex' | 'local' }> {
+): Promise<{ papers: Paper[]; total: number; totalCapped: boolean; page: number }> {
   const r = await guarded(`/api/search?q=${encodeURIComponent(q)}&page=${page}&sort=${sort}`)
   return r.json()
 }

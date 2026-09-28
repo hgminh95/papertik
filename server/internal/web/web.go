@@ -30,7 +30,7 @@ type Config struct {
 	OpenAlexAPIKey   string // optional, raises OpenAlex rate limits
 	PendingPath      string // where to log papers to ingest later (empty = don't log)
 	IndexPath        string // index.bin; watched, and reloaded when a new build replaces it
-	TaxonomyPath     string // ingest/taxonomy.json: OpenAlex topic -> PaperTik category, for live search results
+	TaxonomyPath     string // ingest/taxonomy.json: OpenAlex topic -> PaperTik category (papers fetched live)
 	PapersPath       string // papers.jsonl (append-only; the index points into it)
 	FacebookAppID    string // optional fb:app_id for Facebook link previews / Insights
 	PublicURL        string // e.g. https://papertik.app, for canonical links and sitemaps (default: from the request)
@@ -42,7 +42,8 @@ type Server struct {
 	db       *shm.Client
 	rec      *feed.Recommender
 	sessions sessions
-	search   *searcher
+	search   *searcher // OpenAlex client (single-paper lookups)
+	fts      *ftsIndex // local full-text search
 	pending  *pendingLog
 	index    indexHTML
 	metrics  metrics
@@ -55,7 +56,6 @@ type Server struct {
 type snapshot struct {
 	st      *store.Store
 	explore *explorer
-	titles  *titleIndex // built on first local search
 	stamp   fileStamp
 }
 
@@ -74,6 +74,7 @@ func New(cfg Config, db *shm.Client, rec *feed.Recommender) (*Server, error) {
 		sessions: sessions{key: cfg.SessionKey},
 		search:   newSearcher(cfg.OpenAlexMailto, cfg.OpenAlexAPIKey, loadTaxonomy(cfg.TaxonomyPath)),
 		pending:  pending,
+		fts:      &ftsIndex{path: filepath.Join(filepath.Dir(cfg.PapersPath), "search.db"), cache: map[string]ftsResult{}},
 	}
 	sn, err := srv.load()
 	if err != nil {
@@ -109,7 +110,7 @@ func (s *Server) load() (*snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &snapshot{st: st, explore: &explorer{}, titles: &titleIndex{}, stamp: stamp}, nil
+	return &snapshot{st: st, explore: &explorer{}, stamp: stamp}, nil
 }
 
 // watch reloads the index when a new build replaces index.bin (the ingest service writes a

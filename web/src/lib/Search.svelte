@@ -39,7 +39,7 @@
   let page = $state(1)
   let loading = $state(false)
   let error = $state('')
-  let source = $state<'openalex' | 'local'>('openalex')
+  let capped = $state(false) // more than `total` matches (the server stops counting)
 
   const likedIds = $derived(new Set(user.liked.map((p) => p.id)))
   const savedIds = $derived(new Set(user.bookmarks.map((p) => p.id)))
@@ -56,7 +56,7 @@
       results = nextPage === 1 ? res.papers : [...results, ...res.papers.filter((p) => !results.some((r) => r.id === p.id))]
       total = res.total
       page = res.page
-      source = res.source
+      capped = res.totalCapped
       submitted = q
       history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}${sort ? `&sort=${sort}` : ''}`)
     } catch (e) {
@@ -103,7 +103,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
     <input
       type="search"
-      placeholder="Search computer science papers"
+      placeholder="Search titles, authors, abstracts"
       aria-label="Search papers"
       enterkeyhint="search"
       bind:value={query}
@@ -158,13 +158,9 @@
   {/if}
 
   {#if submitted}
-    {#if source === 'local'}
-      <p class="fallback" role="status">
-        OpenAlex search is unavailable right now (it rate-limits anonymous search), so these are matches from the
-        PaperTik index only.
-      </p>
-    {/if}
-    <p class="count">{total.toLocaleString()} result{total === 1 ? '' : 's'} for “{submitted}”</p>
+    <p class="count">
+      {total.toLocaleString()}{capped ? '+' : ''} result{total === 1 && !capped ? '' : 's'} for “{submitted}”
+    </p>
     <ul class="results">
       {#each results as p (p.id)}
         <li class="result">
@@ -405,15 +401,6 @@
     color: var(--muted);
     font-size: 13px;
     margin: 16px 0 4px;
-  }
-  .fallback {
-    margin: 16px 0 0;
-    padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--surface);
-    color: var(--fg-soft);
-    font-size: 13px;
-    line-height: 1.45;
   }
   .error {
     color: var(--accent);

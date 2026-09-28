@@ -9,6 +9,8 @@
       requestsPerSec: number
       feedPerSec: number
       feedLatencyMs: number
+      searchesLastHour: number
+      searchLatencyMs: number
       errorsPerMin: number
       limitedPerMin: number
       series: { t: number; requests: number; feed: number }[]
@@ -45,6 +47,7 @@
       fetchPausedWhy?: string | null
       openalexQuota?: null | { limit: number; remaining: number; resetsAt: string }
       excluded?: number
+      searchable?: number
       relabel?: null | { done: number; total: number }
     }
   }
@@ -153,7 +156,9 @@
         ]}
       />
       <p class="note">
-        Errors (5xx) last minute: <b>{data.traffic.errorsPerMin}</b> · rate-limited (429): <b>{data.traffic.limitedPerMin}</b>
+        Errors (5xx) last minute: <b>{data.traffic.errorsPerMin}</b> · rate-limited (429): <b>{data.traffic.limitedPerMin}</b> ·
+        searches last hour: <b>{num(data.traffic.searchesLastHour)}</b>{#if data.traffic.searchesLastHour}, avg
+          <b>{data.traffic.searchLatencyMs.toFixed(0)} ms</b>{/if}
       </p>
     </section>
 
@@ -205,6 +210,10 @@
             <dd>
               {num(i.openalexQuota.remaining)} of {num(i.openalexQuota.limit)} requests left, resets {inTime(i.openalexQuota.resetsAt)}
             </dd>
+          {/if}
+          {#if i.searchable != null}
+            <dt>Search</dt>
+            <dd>{num(i.searchable)} papers searchable</dd>
           {/if}
           {#if i.excluded}
             <dt>Excluded</dt>

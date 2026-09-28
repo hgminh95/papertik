@@ -25,6 +25,8 @@ type second struct {
 	errors   uint32 // 5xx
 	limited  uint32 // 429
 	feedUS   uint64 // total feed latency, microseconds
+	search   uint32
+	searchUS uint64
 }
 
 // metrics keeps one bucket per second for the last hour.
@@ -47,9 +49,13 @@ func (m *metrics) record(path string, status int, d time.Duration) {
 	defer m.mu.Unlock()
 	b := m.bucket(time.Now().Unix())
 	b.requests++
-	if path == "/api/feed" {
+	switch path {
+	case "/api/feed":
 		b.feed++
 		b.feedUS += uint64(d.Microseconds())
+	case "/api/search":
+		b.search++
+		b.searchUS += uint64(d.Microseconds())
 	}
 	if status >= 500 {
 		b.errors++
@@ -60,7 +66,7 @@ func (m *metrics) record(path string, status int, d time.Duration) {
 
 type window struct {
 	Requests, Feed, Errors, Limited uint64
-	FeedUS                          uint64
+	FeedUS, Search, SearchUS        uint64
 }
 
 // sum adds up the buckets for the `secs` seconds before now (the current second is partial).
@@ -78,6 +84,8 @@ func (m *metrics) sum(now int64, secs int) window {
 		w.Errors += uint64(b.errors)
 		w.Limited += uint64(b.limited)
 		w.FeedUS += b.feedUS
+		w.Search += uint64(b.search)
+		w.SearchUS += b.searchUS
 	}
 	return w
 }
@@ -183,6 +191,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if minute.Feed > 0 {
 		avgFeed = float64(minute.FeedUS) / float64(minute.Feed) / 1000
 	}
+	// Searches are rarer than feed requests: average over the last hour.
+	hour := m.sum(now.Unix(), historyMinutes*60)
+	avgSearch := 0.0
+	if hour.Search > 0 {
+		avgSearch = float64(hour.SearchUS) / float64(hour.Search) / 1000
+	}
 	vs, alive := s.db.Stats()
 	qps, busy := s.vecStats.rate(time.Minute)
 
@@ -198,12 +212,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"now":    now.UTC().Format(time.RFC3339),
 		"uptime": int(now.Sub(m.started).Seconds()),
 		"traffic": map[string]any{
-			"requestsPerSec": float64(minute.Requests) / 60,
-			"feedPerSec":     float64(minute.Feed) / 60,
-			"feedLatencyMs":  avgFeed,
-			"errorsPerMin":   minute.Errors,
-			"limitedPerMin":  minute.Limited,
-			"series":         series,
+			"requestsPerSec":   float64(minute.Requests) / 60,
+			"feedPerSec":       float64(minute.Feed) / 60,
+			"feedLatencyMs":    avgFeed,
+			"searchesLastHour": hour.Search,
+			"searchLatencyMs":  avgSearch,
+			"errorsPerMin":     minute.Errors,
+			"limitedPerMin":    minute.Limited,
+			"series":           series,
 		},
 		"index": indexInfo,
 		"vecdb": map[string]any{

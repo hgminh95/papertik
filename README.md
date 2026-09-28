@@ -13,8 +13,8 @@ learns. Design notes are in [PLAN.md](PLAN.md).
   chips and a grid of the most cited (or recent) papers. Tapping a paper opens it followed by a
   "more like this" feed (exact nearest neighbours).
 - **Search**: its own screen (sidebar search box, or the magnifier on phones) with recent
-  searches and suggestions; results from OpenAlex sorted by relevance, citations or date. When
-  OpenAlex rate-limits anonymous search, small indexes fall back to a local title search.
+  searches and suggestions; results sorted by relevance, citations or date. Search is local: a
+  SQLite full-text index over titles, authors and abstracts (see below), no external service.
 - **System status** (link at the bottom of the sidebar): request rates and latency, papers
   indexed, the ingest queue and backfill progress, vecdb load.
 - **Personal**: your taste vector as a heatmap, the papers closest to it, fields you liked,
@@ -63,6 +63,14 @@ computing) and files some non-CS topics (education, geology) under Computer Scie
 or excludes it; excluded papers are never embedded, and ones already stored are left out of the
 index. Edit the file and bump its `version` to relabel everything: the ingest service re-fetches
 each stored paper's topic once and swaps in the result.
+
+**Search** is SQLite FTS5 in `data/search.db`, kept up to date by the ingest service after
+each index build (and when papers are excluded). It stores only what is needed to match and
+rank words (no text), leaves out very common words, and ranks with BM25 (title matches 10x,
+authors 3x, abstract 1x) plus a small citation tiebreak; titles are searched first through a
+separate small title index, which keeps common words fast. Measured on 1M papers: ~5-35 ms for
+specific queries, ~75 ms for a single common word; the index is ~0.7 GB per million papers. The
+server reads it with a pure-Go SQLite driver, so the build still needs no C toolchain.
 
 `ingest/fetch.py` and `ingest/embed.py` still work on their own for one-off jobs (e.g. embedding
 on a GPU machine).
@@ -134,7 +142,7 @@ stateless).
    TURNSTILE_SITEKEY=0x4AAAA...
    TURNSTILE_SECRET=0x4AAAA...
    SESSION_KEY=<openssl rand -hex 32>
-   OPENALEX_API_KEY=...   # optional; anonymous OpenAlex search is heavily rate-limited
+   OPENALEX_API_KEY=...   # optional; raises OpenAlex's daily request budget for ingest
    PUBLIC_URL=https://papertik.app   # canonical links, sitemap, share previews
    ```
    The SPA runs the challenge once, `POST /api/session` verifies it server-side and sets a
@@ -164,8 +172,6 @@ Papers that are not indexed yet get `noindex`. Set `PUBLIC_URL` in production.
 
 ## TODO
 
-- **Find an alternative to OpenAlex for search.** It is too expensive to rely on (anonymous search
-  is throttled; heavy use needs a paid API key). See PLAN.md for options.
 - IVF index in vecdb before loading the full corpus.
 
 ## Tests

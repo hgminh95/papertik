@@ -144,7 +144,7 @@ func encodeF32(v []float32) string {
 func (s *searcher) work(ctx context.Context, id string) (*openAlexWork, error) {
 	key := "work\x00" + id
 	s.mu.Lock()
-	if c, ok := s.works[key]; ok && time.Since(c.at) < searchTTL {
+	if c, ok := s.works[key]; ok && time.Since(c.at) < workCacheTTL {
 		s.mu.Unlock()
 		return c.w, nil
 	}
@@ -161,7 +161,7 @@ func (s *searcher) work(ctx context.Context, id string) (*openAlexWork, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	if len(s.works) >= searchCacheN {
+	if len(s.works) >= workCacheN {
 		clear(s.works)
 	}
 	s.works[key] = cachedWork{time.Now(), &w}

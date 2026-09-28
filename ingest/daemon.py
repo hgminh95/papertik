@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import fetch  # noqa: E402
 import taxonomy  # noqa: E402
 from embed import Embedder, rows_done  # noqa: E402
+from searchindex import SearchIndex  # noqa: E402
 
 FILTER = "primary_topic.field.id:17,has_abstract:true,is_retracted:false,language:en"
 DAY = 86400
@@ -69,6 +70,8 @@ class Ingest:
         self.emb_path = d / "embeddings.f32"
         self.index = d / "index.bin"
         self.pending = d / "pending.jsonl"
+        self.search = SearchIndex(d / "search.db")
+        self.searchable = self.search.count()
         self.state_path = d / "ingest-state.json"
         self.status_path = d / "ingest-status.json"
         self.state = {
@@ -132,6 +135,10 @@ class Ingest:
         self.state["fetch_paused_why"] = why
         self.save_state()
 
+    def sleep_until_unpaused(self):
+        while self.fetch_paused() and not self.stop:
+            time.sleep(min(60, max(1, (self.state["fetch_paused_until"] or 0) - now())))
+
     def fetch_paused(self) -> bool:
         return now() < (self.state.get("fetch_paused_until") or 0)
 
@@ -160,6 +167,7 @@ class Ingest:
             "pendingWaiting": len(self.pending_ids()),
             "lastError": s["last_error"],
             "excluded": s.get("excluded_rows", 0),
+            "searchable": self.searchable,
             "fetchPausedUntil": iso(s.get("fetch_paused_until")) if self.fetch_paused() else None,
             "fetchPausedWhy": s.get("fetch_paused_why") if self.fetch_paused() else None,
             "openalexQuota": ({"limit": fetch.last_quota["limit"], "remaining": fetch.last_quota["remaining"],
@@ -335,6 +343,21 @@ class Ingest:
             return
         self.build(self.papers)
         os.replace(self.index.with_suffix(".tmp.bin"), self.index)  # atomic: vecdb and the server switch on their own
+        self.sync_search()
+
+    def sync_search(self):
+        """Make the papers in the last build searchable (search.db)."""
+        upto = self.state["indexed_rows"]
+        if self.search.position()[0] >= upto:
+            return
+        self.phase = "updating search index"
+        self.status()
+        t = time.time()
+        added = self.search.sync(self.papers, upto)
+        if added > 50_000:
+            self.search.optimize()
+        self.searchable = self.search.count()
+        log(f"search index: +{added:,} papers in {time.time() - t:.0f}s ({self.searchable:,} searchable)")
 
     def build(self, papers: Path):
         """Build index.tmp.bin from `papers` + embeddings (the caller renames it into place)."""
@@ -406,9 +429,15 @@ class Ingest:
                     pass
         tmp = self.papers.with_suffix(".relabel.jsonl")
         excluded = 0
+        newly_excluded = []
+        search_lines = self.search.position()[0]
+        search_offset = 0
         with open(self.papers, encoding="utf-8") as f, open(tmp, "w", encoding="utf-8") as out:
-            for line in f:
+            for n, line in enumerate(f):
+                if n == search_lines:
+                    search_offset = out.tell()
                 row = json.loads(line)
+                was_excluded = bool(row.get("excluded"))
                 pt = cache.get(row["id"])
                 if pt:
                     row.pop("excluded", None)
@@ -418,13 +447,20 @@ class Ingest:
                         labels["field"] = (pt.get("field") or {}).get("display_name") or "Other"
                     row.update(labels)
                 excluded += bool(row.get("excluded"))
+                if row.get("excluded") and not was_excluded:
+                    newly_excluded.append(row["id"])
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
+            if search_lines >= len(ids):
+                search_offset = out.tell()
         # Build the index against the relabelled file, then swap both. Same lines in the same
         # order, so embeddings.f32 stays aligned; excluded papers are simply left out of the index.
         self.build(tmp)
         os.replace(tmp, self.papers)
         os.replace(self.index.with_suffix(".tmp.bin"), self.index)
         self.cursor = (0, 0)  # byte offsets changed
+        self.search.delete(newly_excluded)
+        self.search.reset_position(search_lines, search_offset)
+        self.searchable = self.search.count()
         s["taxonomy_version"] = taxonomy.VERSION
         s["excluded_rows"] = excluded
         s.pop("relabel", None)
@@ -441,9 +477,18 @@ class Ingest:
         while not self.stop and self.state.get("taxonomy_version") != taxonomy.VERSION:
             try:
                 self.relabel()
+            except fetch.RateLimited as ex:
+                log(f"relabel: OpenAlex budget used up; waiting {ex.retry_after / 3600:.1f} h (it resumes where it stopped)")
+                self.pause(ex.retry_after + 60, "OpenAlex daily request budget used up (relabelling)")
+                self.status()
+                self.sleep_until_unpaused()
             except Exception as ex:
                 self.error("relabel", ex)
                 time.sleep(60)
+        try:
+            self.sync_search()  # first start with an existing index, or catching up after a crash
+        except Exception as ex:
+            self.error("search index", ex)
         while not self.stop:
             worked = False
             for name, step in (("pending", self.fetch_pending), ("backfill", self.maybe_backfill), ("new", self.maybe_new)):

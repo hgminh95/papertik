@@ -157,11 +157,7 @@ eventfd/futex doorbell can be added later on Linux without changing the layout.
 
 - [x] Own categories from OpenAlex topics (`ingest/taxonomy.json`); exclude non-CS topics.
 
-- [ ] **Replace OpenAlex for search.** It is too expensive to depend on: anonymous search is
-  throttled and serious traffic needs a paid API key. Candidates: our own full-text index over
-  titles + abstracts (Tantivy, Meilisearch or SQLite FTS5 next to `papers.jsonl`), ideally
-  combined with vecdb for hybrid keyword + semantic search. Today there is a local title-search
-  fallback, but only up to 3M papers.
+- [x] Replace OpenAlex for search: local SQLite FTS5 index (`data/search.db`).
 - [x] IVF (clustered) index in vecdb (`--nprobe`, `vecdb eval`).
 - [ ] Measure recall on real SPECTER embeddings of the full corpus and tune `--nprobe`.
 - [ ] Binary quantisation + int8 re-ranking, if more speed per core is needed.
