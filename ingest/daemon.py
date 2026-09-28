@@ -474,6 +474,13 @@ class Ingest:
         e_dim = 768
         self.embedded = rows_done(self.emb_path, e_dim) if self.emb_path.exists() else 0
         log(f"starting: {self.lines} papers fetched, {self.embedded} embedded, {self.state['indexed_rows']} indexed")
+        # Search first: what is already indexed becomes searchable within a minute or two, even
+        # if a relabel below has to wait days for OpenAlex's request budget (it removes papers
+        # it excludes from search afterwards).
+        try:
+            self.sync_search()
+        except Exception as ex:
+            self.error("search index", ex)
         while not self.stop and self.state.get("taxonomy_version") != taxonomy.VERSION:
             try:
                 self.relabel()
@@ -485,10 +492,6 @@ class Ingest:
             except Exception as ex:
                 self.error("relabel", ex)
                 time.sleep(60)
-        try:
-            self.sync_search()  # first start with an existing index, or catching up after a crash
-        except Exception as ex:
-            self.error("search index", ex)
         while not self.stop:
             worked = False
             for name, step in (("pending", self.fetch_pending), ("backfill", self.maybe_backfill), ("new", self.maybe_new)):
