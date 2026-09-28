@@ -78,6 +78,12 @@ class Ingest:
         }
         if self.state_path.exists():
             self.state.update(json.loads(self.state_path.read_text()))
+        st = self.state
+        if st["backfill_done"] and st["backfill_total"] and st["backfill_seen"] < 0.98 * st["backfill_total"]:
+            # Marked complete far short of OpenAlex's count (an empty page while throttled, in older
+            # versions): carry on from the saved cursor.
+            log(f"backfill was marked complete at {st['backfill_seen']:,} of {st['backfill_total']:,}; resuming")
+            st["backfill_done"] = False
         self.repair_papers()
         fetch.load_existing(str(self.papers))  # ids + titles already fetched (dedupe)
         self.lines = sum(1 for _ in open(self.papers, "rb")) if self.papers.exists() else 0
@@ -120,6 +126,15 @@ class Ingest:
 
     # ---- bookkeeping ----
 
+    def pause(self, seconds: float, why: str):
+        """Stop fetching from OpenAlex for a while (embedding and index builds carry on)."""
+        self.state["fetch_paused_until"] = now() + seconds
+        self.state["fetch_paused_why"] = why
+        self.save_state()
+
+    def fetch_paused(self) -> bool:
+        return now() < (self.state.get("fetch_paused_until") or 0)
+
     def save_state(self):
         write_json_atomic(self.state_path, self.state)
 
@@ -145,6 +160,11 @@ class Ingest:
             "pendingWaiting": len(self.pending_ids()),
             "lastError": s["last_error"],
             "excluded": s.get("excluded_rows", 0),
+            "fetchPausedUntil": iso(s.get("fetch_paused_until")) if self.fetch_paused() else None,
+            "fetchPausedWhy": s.get("fetch_paused_why") if self.fetch_paused() else None,
+            "openalexQuota": ({"limit": fetch.last_quota["limit"], "remaining": fetch.last_quota["remaining"],
+                               "resetsAt": iso(fetch.last_quota["at"] + fetch.last_quota["reset_in"])}
+                              if fetch.last_quota else None),
             "relabel": s.get("relabel"),
         })
 
@@ -220,6 +240,14 @@ class Ingest:
             added += self.append([r for r in (fetch.convert(w) for w in res["results"]) if r])
             cursor = res["meta"].get("next_cursor")
             if not cursor or not res["results"]:
+                total = s["backfill_total"] or 0
+                if s["backfill_seen"] < 0.98 * total:
+                    # An empty page long before the end is OpenAlex having a moment (e.g. while
+                    # throttling us), not the end of the list: keep the cursor and try again later.
+                    log(f"backfill: OpenAlex returned an empty page at {s['backfill_seen']:,} of {total:,}; "
+                        "will retry from the same position")
+                    self.pause(1800, "OpenAlex returned an empty page")
+                    break
                 s["backfill_done"] = True
                 s["last_new_check"] = now()
                 log(f"backfill complete: {s['backfill_seen']} works seen")
@@ -419,9 +447,15 @@ class Ingest:
         while not self.stop:
             worked = False
             for name, step in (("pending", self.fetch_pending), ("backfill", self.maybe_backfill), ("new", self.maybe_new)):
+                if self.fetch_paused():
+                    break
                 try:
                     self.phase = "fetching " + name
                     worked |= step() > 0
+                except fetch.RateLimited as ex:
+                    log(f"OpenAlex budget used up; pausing fetches for {ex.retry_after / 3600:.1f} h "
+                        "(set OPENALEX_API_KEY for a bigger budget)")
+                    self.pause(ex.retry_after + 60, "OpenAlex daily request budget used up")
                 except Exception as ex:  # network trouble, OpenAlex 5xx: log and carry on
                     self.error(f"fetch {name}", ex)
             try:

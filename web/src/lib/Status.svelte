@@ -41,6 +41,11 @@
       lastNewCheck: string | null
       pendingWaiting: number
       lastError: null | { at: string; message: string }
+      fetchPausedUntil?: string | null
+      fetchPausedWhy?: string | null
+      openalexQuota?: null | { limit: number; remaining: number; resetsAt: string }
+      excluded?: number
+      relabel?: null | { done: number; total: number }
     }
   }
 
@@ -78,6 +83,7 @@
     return `${(s / 86400).toFixed(1)} days`
   }
   const ago = (iso: string | null | undefined) => (iso ? dur((tick - Date.parse(iso)) / 1000) + ' ago' : '—')
+  const inTime = (iso: string | null | undefined) => (iso ? 'in ' + dur(Math.max(0, (Date.parse(iso) - tick) / 1000)) : '—')
 
   const ingestStale = $derived(!!data?.ingest && tick - Date.parse(data.ingest.updatedAt) > 30 * 60_000 && data.ingest.phase !== 'idle')
   const recentError = $derived(
@@ -90,6 +96,7 @@
     if (data.traffic.errorsPerMin > 0) return { level: 'warning', label: 'Some requests failing' }
     if (!data.ingest) return { level: 'warning', label: 'Operational · ingest service not running' }
     if (ingestStale) return { level: 'warning', label: 'Operational · ingest looks stuck' }
+    if (data.ingest.fetchPausedUntil) return { level: 'warning', label: 'Operational · fetching new papers is paused' }
     if (recentError) return { level: 'warning', label: 'Operational · ingest reported an error' }
     return { level: 'good', label: 'All systems operational' }
   })
@@ -173,7 +180,8 @@
           <dt>Backfill</dt>
           <dd>
             {#if i.backfill.done}
-              complete · checking for new papers every few hours (last {ago(i.lastNewCheck)})
+              complete ({num(i.backfill.seen)} of {num(i.backfill.total ?? 0)} scanned) · checking for new papers every few
+              hours (last {ago(i.lastNewCheck)})
             {:else if i.backfill.total}
               <div class="bar" role="progressbar" aria-valuenow={Math.round(backfillPct)} aria-valuemin="0" aria-valuemax="100">
                 <span style="width:{backfillPct}%"></span>
@@ -184,6 +192,24 @@
               starting
             {/if}
           </dd>
+          {#if i.fetchPausedUntil}
+            <dt>Fetching</dt>
+            <dd class="warn">paused {inTime(i.fetchPausedUntil)}: {i.fetchPausedWhy}. Embedding and index builds carry on.</dd>
+          {/if}
+          {#if i.relabel}
+            <dt>Relabelling</dt>
+            <dd>{num(i.relabel.done)} of {num(i.relabel.total)} papers' topics fetched</dd>
+          {/if}
+          {#if i.openalexQuota}
+            <dt>OpenAlex budget</dt>
+            <dd>
+              {num(i.openalexQuota.remaining)} of {num(i.openalexQuota.limit)} requests left, resets {inTime(i.openalexQuota.resetsAt)}
+            </dd>
+          {/if}
+          {#if i.excluded}
+            <dt>Excluded</dt>
+            <dd>{num(i.excluded)} papers outside computer science left out of the index</dd>
+          {/if}
           <dt>Last build</dt>
           <dd>{i.lastBuild ? `${ago(i.lastBuild.at)} · ${num(i.lastBuild.rows)} papers in ${dur(i.lastBuild.seconds)}` : 'not yet'}</dd>
           <dt>Requested</dt>
@@ -386,6 +412,9 @@
   }
   dd.err {
     color: #d03b3b;
+  }
+  dd.warn {
+    color: #fab219;
   }
   .bar {
     height: 8px;

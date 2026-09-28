@@ -28,6 +28,7 @@ import json
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -118,17 +119,46 @@ def convert(w: dict, require_cs: bool = True) -> dict | None:
     }
 
 
+class RateLimited(Exception):
+    """OpenAlex's request budget is used up; retry after `retry_after` seconds.
+
+    Anonymous clients get a small daily budget (1,000 requests at the time of writing); an API
+    key raises it. The budget is reported in X-RateLimit-* headers."""
+
+    def __init__(self, retry_after: float):
+        super().__init__(f"OpenAlex rate limit: retry in {retry_after / 3600:.1f} h")
+        self.retry_after = retry_after
+
+
+# The X-RateLimit-* headers of the last OpenAlex response (remaining budget, reset time).
+last_quota: dict = {}
+
+
 def get_json(url: str, retries: int = 6) -> dict:
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
+                h = r.headers
+                if h.get("X-RateLimit-Limit"):
+                    last_quota.update(limit=int(h["X-RateLimit-Limit"]), remaining=int(h.get("X-RateLimit-Remaining", 0)),
+                                      reset_in=int(h.get("X-RateLimit-Reset", 0)), at=time.time())
                 return json.load(r)
-        except Exception as e:  # network blips, 429s, 5xx
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = float(e.headers.get("Retry-After") or e.headers.get("X-RateLimit-Reset") or 60)
+                if wait > 120:  # the daily budget is gone: retrying now only wastes time
+                    raise RateLimited(wait) from e
+            elif e.code < 500:
+                raise
             if attempt == retries - 1:
                 raise
-            wait = 2**attempt
-            print(f"  retry in {wait}s: {e}", file=sys.stderr)
-            time.sleep(wait)
+            print(f"  retry in {2**attempt}s: {e}", file=sys.stderr)
+            time.sleep(2**attempt)
+        except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError) as e:
+            if attempt == retries - 1:
+                raise
+            print(f"  retry in {2**attempt}s: {e}", file=sys.stderr)
+            time.sleep(2**attempt)
     raise AssertionError
 
 

@@ -135,6 +135,14 @@ measured at startup and used where it is faster), so the full 8.3M corpus takes 
 weeks. The most cited papers come first, so the feed is good long before that. The System
 Status page shows the rate and an estimate.
 
+**OpenAlex's request budget.** Without an API key, OpenAlex allows about 1,000 requests a day
+(it reports the budget in `X-RateLimit-*` headers). The backfill fetches 200 papers per
+request, so anonymously it adds at most ~200k papers a day and the full corpus takes about six
+weeks, far longer than embedding. When the budget runs out the service pauses fetching until it
+resets (embedding carries on) and shows it on the status page. A free API key from
+openalex.org raises the budget: put it in `OPENALEX_API_KEY` in `/etc/papertok.env` and
+restart `papertok-ingest`.
+
 **Optional: skip the wait with a GPU.** Embedding is the slow part. To load the whole corpus in
 an afternoon, run the same service on a rented GPU machine against an empty directory
 (`uv run ingest/daemon.py --data ./data --vecdb path/to/vecdb`; it uses CUDA automatically),
