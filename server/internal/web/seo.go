@@ -97,6 +97,7 @@ func (s *Server) handlePaperPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not built", http.StatusInternalServerError)
 		return
 	}
+	page = s.preparePage(page, r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 

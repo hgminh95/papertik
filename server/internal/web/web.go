@@ -2,7 +2,9 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -175,9 +177,12 @@ func (s *Server) Handler() http.Handler {
 
 // ---- handlers ----
 
+func (s *Server) config() map[string]any {
+	return map[string]any{"turnstileSiteKey": s.turnstileSiteKey(), "dim": s.snap().st.Dim}
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	st := s.snap().st
-	writeJSON(w, map[string]any{"turnstileSiteKey": s.turnstileSiteKey(), "dim": st.Dim})
+	writeJSON(w, s.config())
 }
 
 func (s *Server) turnstileSiteKey() string {
@@ -339,9 +344,16 @@ func (s *Server) static() http.Handler {
 			s.renderShell(w, r) // an app page: per-route title, canonical URL, Open Graph tags
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/assets/") {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/assets/"):
 			// Vite emits content-hashed names; let Cloudflare cache them forever.
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case strings.HasSuffix(r.URL.Path, ".webmanifest"):
+			// Go doesn't know this type (it would send text/plain).
+			w.Header().Set("Content-Type", "application/manifest+json")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		default: // icons, og-image: stable names, so a day at most
+			w.Header().Set("Cache-Control", "public, max-age=86400")
 		}
 		files.ServeHTTP(w, r)
 	})
@@ -356,17 +368,39 @@ func apiHeaders(next http.Handler) http.Handler {
 	})
 }
 
+type nonceKey struct{}
+
+// securityHeaders sets the CSP. Cloudflare injects two scripts into our pages: an inline bot
+// detection loader (different on every response, so it can't be allowed by hash) and the Web
+// Analytics beacon. Both take the nonce from this header, so each response gets a fresh one;
+// 'strict-dynamic' then lets nonced scripts load what they need (the Turnstile and
+// /cdn-cgi/ scripts). The host list is only a fallback for browsers without 'strict-dynamic'.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b [16]byte
+		rand.Read(b[:])
+		nonce := base64.StdEncoding.EncodeToString(b[:])
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self' https://challenges.cloudflare.com; "+
-				"frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data:; connect-src 'self'")
-		next.ServeHTTP(w, r)
+			"default-src 'self'; script-src 'nonce-"+nonce+"' 'strict-dynamic' 'self' https://challenges.cloudflare.com "+
+				"https://static.cloudflareinsights.com; frame-src https://challenges.cloudflare.com; "+
+				"style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com")
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), nonceKey{}, nonce)))
 	})
+}
+
+// preparePage gives the page's own script tags this response's CSP nonce, and embeds the
+// client config (saving the app a round trip to /api/config before it can start). page is not
+// modified.
+func (s *Server) preparePage(page []byte, r *http.Request) []byte {
+	if nonce, _ := r.Context().Value(nonceKey{}).(string); nonce != "" {
+		page = bytes.ReplaceAll(page, []byte(`<script type="module"`), []byte(`<script nonce="`+nonce+`" type="module"`))
+	}
+	cfg, _ := json.Marshal(s.config()) // escapes <, > and &, so it cannot close the script tag
+	return bytes.Replace(page, []byte("</head>"),
+		append(append([]byte(`<script type="application/json" id="config">`), cfg...), "</script>\n  </head>"...), 1)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

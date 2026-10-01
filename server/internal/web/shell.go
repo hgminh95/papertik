@@ -78,6 +78,7 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not built", http.StatusInternalServerError)
 		return
 	}
+	page = s.preparePage(page, r)
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "" {
 		path = "/"

@@ -20,12 +20,12 @@ let session: Promise<void> | null = null
 
 export function getConfig(): Promise<Config> {
   if (!configP) {
-    configP = fetch('/api/config')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`config ${r.status}`))))
-      .catch((e) => {
-        configP = null
-        throw e
-      })
+    // Normally embedded in the page by the server; /api/config is the fallback (vite dev).
+    const el = document.getElementById('config')
+    configP = el
+      ? Promise.resolve(JSON.parse(el.textContent!) as Config)
+      : fetch('/api/config').then((r) => (r.ok ? r.json() : Promise.reject(new Error(`config ${r.status}`))))
+    configP.catch(() => (configP = null))
   }
   return configP
 }
@@ -65,12 +65,37 @@ async function newSession(): Promise<void> {
       body: JSON.stringify({ token }),
     })
     if (!r.ok) throw new Error('verification rejected')
+    remember(true)
   } finally {
     holder.remove()
   }
 }
 
+// The session cookie (HttpOnly, 24 h) outlives the page, so remember when it was issued: a
+// returning visitor then goes straight to the API, and runs Turnstile only if that returns 401.
+const SESSION_HINT = 'papertik.session'
+const SESSION_HOURS = 23 // a little under the server's 24 h
+
+function remember(ok: boolean) {
+  try {
+    if (ok) localStorage.setItem(SESSION_HINT, String(Date.now() + SESSION_HOURS * 3600_000))
+    else localStorage.removeItem(SESSION_HINT)
+  } catch {
+    // storage blocked: Turnstile on every load, as before
+  }
+}
+
+function hasSession(): boolean {
+  try {
+    return Number(localStorage.getItem(SESSION_HINT)) > Date.now()
+  } catch {
+    return false
+  }
+}
+
 function ensureSession(force = false): Promise<void> {
+  if (force) remember(false)
+  if (!session && !force && hasSession()) session = Promise.resolve()
   if (!session || force) {
     session = newSession().catch((e) => {
       session = null
