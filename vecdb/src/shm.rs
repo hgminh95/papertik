@@ -25,10 +25,13 @@
 //!  16  status       u32
 //!  20  n_results    u32
 //!  24  build_id     u64  (index build the request's row numbers refer to; mismatch -> STATUS_STALE)
+//!  32  n_fields u32   36 n_topics u32   40 n_venues u32   44 cited_min u32  (feed filter, see
+//!  48  year_min u32   52 year_max u32                                         search::Filter)
 //!  64  query          f32[dim]
 //!      exclude        u32[max_exclude]
 //!      result_rows    u32[max_k]
 //!      result_scores  f32[max_k]
+//!      filter_values  u32[3 * MAX_FILTER_VALUES]   fields, then topics, then venues
 //! ```
 
 use anyhow::{Context, Result};
@@ -38,7 +41,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"PTKSHM01");
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
+/// Most values per filter list (categories, topics, venues).
+pub const MAX_FILTER_VALUES: usize = 32;
 pub const HEADER_SIZE: usize = 128;
 pub const SLOT_HEADER_SIZE: usize = 64;
 
@@ -67,7 +72,7 @@ pub struct Geometry {
 
 impl Geometry {
     pub fn slot_size(&self) -> usize {
-        let raw = SLOT_HEADER_SIZE + 4 * (self.dim + self.max_exclude + 2 * self.max_k);
+        let raw = SLOT_HEADER_SIZE + 4 * (self.dim + self.max_exclude + 2 * self.max_k + 3 * MAX_FILTER_VALUES);
         raw.div_ceil(64) * 64
     }
     fn off_exclude(&self) -> usize {
@@ -78,6 +83,9 @@ impl Geometry {
     }
     fn off_scores(&self) -> usize {
         self.off_rows() + 4 * self.max_k
+    }
+    fn off_filter(&self) -> usize {
+        self.off_scores() + 4 * self.max_k
     }
 }
 
@@ -220,6 +228,24 @@ impl<'a> Slot<'a> {
     pub fn exclude(&self) -> &[u32] {
         let n = self.n_exclude().min(self.geo.max_exclude);
         unsafe { std::slice::from_raw_parts(self.base.add(self.geo.off_exclude()) as *const u32, n) }
+    }
+
+    /// The request's feed filter (empty = none).
+    pub fn filter(&self) -> crate::search::Filter {
+        let n = |off: usize| (self.u32_at(off) as usize).min(MAX_FILTER_VALUES);
+        let values = |list: usize, len: usize| -> Vec<u32> {
+            let at = self.geo.off_filter() + 4 * list * MAX_FILTER_VALUES;
+            (0..len).map(|i| self.u32_at(at + 4 * i)).collect()
+        };
+        let year = |off: usize| self.u32_at(off).min(u16::MAX as u32) as u16;
+        crate::search::Filter {
+            year_min: year(48),
+            year_max: year(52),
+            cited_min: self.u32_at(44),
+            fields: values(0, n(32)),
+            topics: values(1, n(36)).into_iter().map(|t| t.min(u16::MAX as u32) as u16).collect(),
+            venues: values(2, n(40)),
+        }
     }
 
     /// Write the response and hand the slot back (BUSY -> DONE, or FREE if the client gave up).

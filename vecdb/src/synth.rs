@@ -99,6 +99,7 @@ pub fn generate(n: usize, dim: usize, n_topics: usize, out_dir: &Path, seed: u64
             "year": 2000 + (rng.next_u64() % 26),
             "venue": rng.pick(VENUES),
             "field": field,
+            "topic_id": format!("T{}", 10_000 + t * 6 + s),
             "doi": null,
             "url": null,
             "pdf_url": null,
@@ -141,7 +142,7 @@ pub fn generate_index(n: usize, dim: usize, n_topics: usize, out_dir: &Path, see
     let t = std::time::Instant::now();
     let chunks = n.div_ceil(CHUNK);
     for group in (0..chunks).collect::<Vec<_>>().chunks(rayon::current_num_threads() * 2) {
-        let made: Vec<Vec<(String, Vec<i8>, f32)>> = group
+        let made: Vec<Vec<(String, crate::index::Attr, Vec<i8>, f32)>> = group
             .par_iter()
             .map(|&c| {
                 let mut rng = Rng::new(seed ^ (c as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
@@ -166,28 +167,33 @@ pub fn generate_index(n: usize, dim: usize, n_topics: usize, out_dir: &Path, see
                         let (q, scale) = crate::search::quantize(&v);
                         let (field, kws) = TOPICS[t];
                         let title = format!("{} {} {} {} (#{})", rng.pick(ADJ), rng.pick(kws), rng.pick(CONN), rng.pick(kws), s);
+                        let (year, venue, cited) = (2000 + (rng.next_u64() % 26) as i64, rng.pick(VENUES), (rng.next_u64() % 5000) as i64);
+                        let topic_id = format!("T{}", 10_000 + t * SUB + s);
                         let row = serde_json::json!({
                             "id": format!("W{}", 1_000_000 + i),
                             "title": title,
                             "abstract": format!("Synthetic paper #{i} in {field}, subtopic {s}. Used to measure PaperTik at full-corpus scale."),
                             "authors": [format!("{} {}", rng.pick(FIRST), rng.pick(LAST))],
-                            "year": 2000 + (rng.next_u64() % 26),
-                            "venue": rng.pick(VENUES),
+                            "year": year,
+                            "venue": venue,
                             "field": field,
-                            "cited_by": rng.next_u64() % 5000,
+                            "topic": format!("{field} subtopic {s}"),
+                            "topic_id": topic_id,
+                            "cited_by": cited,
                         });
-                        (row.to_string(), q, scale)
+                        let attr = crate::index::attr_of(year, cited, field, venue, &topic_id);
+                        (row.to_string(), attr, q, scale)
                     })
                     .collect()
             })
             .collect();
         for chunk in made {
-            for (line, q, scale) in chunk {
+            for (line, attr, q, scale) in chunk {
                 let i = b.len();
                 papers.write_all(line.as_bytes())?;
                 papers.write_all(b"\n")?;
                 let len = line.len() as u64 + 1;
-                b.push_quantized(1_000_000 + i as u64, [pos, pos + len], &q, scale);
+                b.push_quantized(1_000_000 + i as u64, [pos, pos + len], attr, &q, scale);
                 pos += len;
             }
         }

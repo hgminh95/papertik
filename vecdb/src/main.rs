@@ -96,6 +96,9 @@ enum Cmd {
         queries: usize,
         #[arg(long, default_value_t = 100)]
         k: usize,
+        /// Only measure feed filters (IVF with this nprobe), skip the exact-scan benchmarks
+        #[arg(long)]
+        filters: Option<usize>,
     },
 }
 
@@ -117,7 +120,8 @@ fn main() -> Result<()> {
                 synth::generate(n, dim, topics, &out, seed)
             }
         }
-        Cmd::Bench { index, queries, k } => bench(&index, queries, k),
+        Cmd::Bench { index, queries, k, filters: Some(nprobe) } => bench_filters(&index, queries, k, nprobe),
+        Cmd::Bench { index, queries, k, filters: None } => bench(&index, queries, k),
         Cmd::Eval { index, queries, k, nprobe } => eval(&index, queries, k, &nprobe),
         Cmd::Serve { index, shm, slots, max_k, max_exclude, threads, nprobe } => {
             if threads > 0 {
@@ -319,12 +323,13 @@ fn handle(index: &Index, slots: Vec<shm::Slot<'_>>, nprobe: usize) {
         }
     }
     let excludes: Vec<HashSet<u32>> = valid.iter().map(|s| s.exclude().iter().copied().collect()).collect();
+    let filters: Vec<search::Filter> = valid.iter().map(|s| s.filter()).collect();
     let queries: Vec<search::Query> = valid
         .iter()
-        .zip(&excludes)
-        .map(|(s, exclude)| search::Query { q: s.query(), k: s.k(), exclude })
+        .zip(excludes.iter().zip(&filters))
+        .map(|(s, (exclude, filter))| search::Query { q: s.query(), k: s.k(), exclude, filter })
         .collect();
-    let results = search::search_batch_ivf(index, &queries, nprobe);
+    let results = search::search_mixed(index, &queries, nprobe);
     for (slot, hits) in valid.iter().zip(results) {
         let r: Vec<(u32, f32)> = hits.iter().map(|h| (h.row, h.score)).collect();
         slot.complete(shm::STATUS_OK, &r);
@@ -362,12 +367,56 @@ fn bench(index_path: &PathBuf, queries: usize, k: usize) -> Result<()> {
     Ok(())
 }
 
+/// Latency of filtered feed queries, from broad filters to ones matching a few hundred papers.
+/// Filters are built from the index's own attributes so they match at every corpus size.
+fn bench_filters(index_path: &PathBuf, queries: usize, k: usize, nprobe: usize) -> Result<()> {
+    let index = Index::open(index_path)?;
+    let attrs = index.attrs().ok_or_else(|| anyhow::anyhow!("index has no filter attributes (version 2): rebuild it"))?;
+    let qs = sample_queries(&index, queries, 21);
+    let ex = HashSet::new();
+    let a = attrs[index.n / 2];
+    let filters: Vec<(&str, search::Filter)> = vec![
+        ("none", search::Filter::default()),
+        ("year >= median-ish", search::Filter { year_min: a.year, ..Default::default() }),
+        ("one category", search::Filter { fields: vec![a.field], ..Default::default() }),
+        ("one venue", search::Filter { venues: vec![a.venue], ..Default::default() }),
+        ("one topic", search::Filter { topics: vec![a.topic], ..Default::default() }),
+        ("topic + venue + year", search::Filter { topics: vec![a.topic], venues: vec![a.venue], year_min: a.year, ..Default::default() }),
+        ("nothing matches", search::Filter { venues: vec![1], ..Default::default() }),
+    ];
+    let _ = search::search_mixed(&index, &[search::Query { q: &qs[0], k, exclude: &ex, filter: &filters[0].1 }], nprobe); // warm up
+    println!("n={} lists={} nprobe={} k={} threads={}", index.n, index.nlist, nprobe, k, rayon::current_num_threads());
+    println!("{:<22} {:>12} {:>9} {:>10} {:>10}", "filter", "matching", "results", "p50 ms", "p99 ms");
+    for (name, f) in &filters {
+        let matching = attrs.iter().filter(|a| f.matches(a)).count();
+        let mut lat = Vec::with_capacity(qs.len());
+        let mut results = 0;
+        for q in &qs {
+            let t = Instant::now();
+            let hits = search::search_mixed(&index, &[search::Query { q, k, exclude: &ex, filter: f }], nprobe);
+            lat.push(t.elapsed());
+            results += hits[0].len();
+        }
+        lat.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1e3;
+        println!(
+            "{:<22} {:>12} {:>9.0} {:>10.2} {:>10.2}",
+            name,
+            matching,
+            results as f64 / qs.len() as f64,
+            ms(lat[lat.len() / 2]),
+            ms(lat[(lat.len() * 99 / 100).min(lat.len() - 1)])
+        );
+    }
+    Ok(())
+}
+
 fn bench_batch(index: &Index, k: usize) -> Result<()> {
     let mut rng = synth::Rng::new(11);
     let ex = HashSet::new();
     for b in [1, 4, 16, 32, 64] {
         let qs: Vec<Vec<f32>> = (0..b).map(|_| (0..index.dim).map(|_| rng.gauss()).collect()).collect();
-        let batch: Vec<search::Query> = qs.iter().map(|q| search::Query { q, k, exclude: &ex }).collect();
+        let batch: Vec<search::Query> = qs.iter().map(|q| search::Query { q, k, exclude: &ex, filter: &search::NO_FILTER }).collect();
         let t = Instant::now();
         let reps = 10;
         for _ in 0..reps {
@@ -404,7 +453,7 @@ fn eval(index_path: &PathBuf, n: usize, k: usize, nprobes: &[usize]) -> Result<(
     let index = Index::open(index_path)?;
     let qs = sample_queries(&index, n, 5);
     let none = HashSet::new();
-    let queries: Vec<search::Query> = qs.iter().map(|q| search::Query { q, k, exclude: &none }).collect();
+    let queries: Vec<search::Query> = qs.iter().map(|q| search::Query { q, k, exclude: &none, filter: &search::NO_FILTER }).collect();
     let batch = 16;
     let run = |nprobe: usize| -> (Vec<Vec<search::Hit>>, f64) {
         let t = Instant::now();

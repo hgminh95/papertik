@@ -1,4 +1,4 @@
-import type { Paper } from './user.svelte'
+import { filterActive, type FeedFilter, type Paper } from './user.svelte'
 
 declare global {
   interface Window {
@@ -125,14 +125,46 @@ async function guarded(input: string, init?: RequestInit): Promise<Response> {
   return r
 }
 
+/** The filter as the server takes it (undefined = none). */
+function filterBody(f: FeedFilter | null | undefined) {
+  if (!filterActive(f)) return undefined
+  return { ...f, topics: f.topics.map((t) => t.id) }
+}
+
 export async function fetchFeed(
   pref: string | null,
   seen: string[],
-  opts: { k?: number; mode?: 'feed' | 'top' } = {},
+  opts: { k?: number; mode?: 'feed' | 'top'; filter?: FeedFilter | null } = {},
 ): Promise<Paper[]> {
-  const body = JSON.stringify({ pref: pref ?? '', seen: seen.slice(-1000), k: opts.k ?? 8, mode: opts.mode ?? '' })
+  const body = JSON.stringify({
+    pref: pref ?? '',
+    seen: seen.slice(-1000),
+    k: opts.k ?? 8,
+    mode: opts.mode ?? '',
+    filter: filterBody(opts.filter),
+  })
   const r = await guarded('/api/feed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
   return (await r.json()).papers as Paper[]
+}
+
+export interface FilterOption {
+  id?: string // topics: OpenAlex id
+  name: string
+  field?: string // topics: their category
+  count: number
+}
+
+/** Topics or venues whose name contains q (most papers first). */
+export async function getFilterOptions(kind: 'topic' | 'venue', q: string, signal?: AbortSignal): Promise<FilterOption[]> {
+  const r = await guarded(`/api/filters/options?kind=${kind}&q=${encodeURIComponent(q)}`, { signal })
+  return (await r.json()).options
+}
+
+/** How many indexed papers match a filter. supported=false: the index predates filters. */
+export async function countFilter(f: FeedFilter): Promise<{ count: number; total: number; supported: boolean }> {
+  const body = JSON.stringify(filterBody(f) ?? {})
+  const r = await guarded('/api/filters/count', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+  return r.json()
 }
 
 export type SearchSort = '' | 'cited' | 'recent'

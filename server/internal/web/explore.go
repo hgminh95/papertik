@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -76,6 +77,17 @@ type explorer struct {
 	fields []fieldCount        // by paper count, descending
 	cited  map[string][]uint32 // field ("" = all) -> rows, most cited first
 	recent map[string][]uint32 // same, limited to recent papers
+	topics []facet             // OpenAlex topics, for feed filters; by paper count, descending
+	venues []facet             // venues, same
+}
+
+// facet is one value a feed filter can pick (a topic or a venue), with its paper count.
+type facet struct {
+	ID    string `json:"id,omitempty"` // topics: OpenAlex id (T10036)
+	Name  string `json:"name"`
+	Field string `json:"field,omitempty"` // topics: their PaperTik category
+	Count int    `json:"count"`
+	lower string // for case-insensitive matching
 }
 
 // build streams papers.jsonl in the background.
@@ -94,14 +106,19 @@ func (e *explorer) build(papersPath string, rowOf func(id string) (uint32, bool)
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	topics := map[string]*facet{}
+	venues := map[string]int{}
 	var row struct {
 		ID      string `json:"id"`
 		Field   string `json:"field"`
 		Year    int    `json:"year"`
 		CitedBy int    `json:"cited_by"`
+		Venue   string `json:"venue"`
+		Topic   string `json:"topic"`
+		TopicID string `json:"topic_id"`
 	}
 	for sc.Scan() {
-		row.ID, row.Field, row.Year, row.CitedBy = "", "", 0, 0
+		row.ID, row.Field, row.Year, row.CitedBy, row.Venue, row.Topic, row.TopicID = "", "", 0, 0, "", "", ""
 		if json.Unmarshal(sc.Bytes(), &row) != nil {
 			continue
 		}
@@ -109,6 +126,17 @@ func (e *explorer) build(papersPath string, rowOf func(id string) (uint32, bool)
 		idx, ok := rowOf(row.ID)
 		if !ok {
 			continue // not in the index (e.g. papers.jsonl has lines not embedded yet)
+		}
+		if row.Venue != "" {
+			venues[row.Venue]++
+		}
+		if row.TopicID != "" {
+			t := topics[row.TopicID]
+			if t == nil {
+				t = &facet{ID: row.TopicID, Name: row.Topic, Field: row.Field}
+				topics[row.TopicID] = t
+			}
+			t.Count++
 		}
 		r := ranked{idx, row.CitedBy}
 		cited[exploreAll].offer(r)
@@ -146,8 +174,25 @@ func (e *explorer) build(papersPath string, rowOf func(id string) (uint32, bool)
 		rc[k] = h.sorted()
 	}
 
+	tf := make([]facet, 0, len(topics))
+	for _, t := range topics {
+		tf = append(tf, *t)
+	}
+	vf := make([]facet, 0, len(venues))
+	for name, n := range venues {
+		vf = append(vf, facet{Name: name, Count: n})
+	}
+	for _, list := range [][]facet{tf, vf} {
+		for i := range list {
+			list[i].lower = strings.ToLower(list[i].Name)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Count > list[j].Count || list[i].Count == list[j].Count && list[i].Name < list[j].Name
+		})
+	}
+
 	e.mu.Lock()
-	e.fields, e.cited, e.recent, e.ready = fields, c, rc, true
+	e.fields, e.cited, e.recent, e.topics, e.venues, e.ready = fields, c, rc, tf, vf, true
 	e.mu.Unlock()
 	log.Printf("explore: indexed %d fields in %s", len(fields), time.Since(start).Round(time.Millisecond))
 }

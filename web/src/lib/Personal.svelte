@@ -1,6 +1,7 @@
 <script lang="ts">
   import TasteVector from './TasteVector.svelte'
   import FieldBars from './FieldBars.svelte'
+  import FeedFilters from './FeedFilters.svelte'
   import { fetchFeed, getConfig } from './api'
   import {
     user,
@@ -110,7 +111,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z" /></svg>
     <span
       ><b>Stored only in this browser</b> (local storage). No account, and the server keeps none of it: your taste vector is
-      sent with each feed request, used to pick papers, and discarded. Use Export below to back it up.</span
+      sent with each feed request (with your feed filters), used to pick papers, and discarded. Use Export below to back it up.</span
     >
   </p>
   <section class="tiles" aria-label="Summary">
@@ -119,6 +120,8 @@
     <div class="tile"><span class="big">{user.seen.length}</span><span class="lbl">papers seen</span></div>
     <div class="tile"><span class="big">{fieldCounts.size}</span><span class="lbl">fields liked</span></div>
   </section>
+
+  <div><FeedFilters /></div>
 
   <section class="panel">
     <h2>Your taste vector</h2>

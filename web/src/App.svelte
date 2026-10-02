@@ -5,10 +5,11 @@
   import PaperView from './lib/PaperView.svelte'
   import Search from './lib/Search.svelte'
   import Status from './lib/Status.svelte'
-  import { user } from './lib/user.svelte'
+  import { user, filterActive } from './lib/user.svelte'
+  import { filterSummary } from './lib/filters'
   import { toast } from './lib/toast.svelte'
   import { syncPendingLikes } from './lib/actions'
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
 
   type Tab = 'foryou' | 'discover' | 'personal' | 'status'
   // Order and icons follow TikTok: For You (home), Explore (compass), Profile (person).
@@ -75,6 +76,13 @@
   }
 
   const hashOf = (t: Tab) => (t === 'status' ? '/status' : TABS.find((x) => x.id === t)!.hash)
+
+  // From For You's filter indicator (or its "no papers match" note) to the filter settings.
+  async function openFilters() {
+    select('personal')
+    await tick()
+    document.getElementById('filters')?.scrollIntoView({ block: 'start' })
+  }
 
   function openSearch() {
     paperId = null
@@ -174,7 +182,20 @@
   <main>
     <div class="view" hidden={tab !== 'foryou'}>
       <h1 class="sr-only">PaperTik: a TikTok-style feed of computer science papers</h1>
-      <Feed bind:this={forYou} getPref={() => user.pref} active={tab === 'foryou' && !paperId && !searching} onopen={openPaper} />
+      <Feed
+        bind:this={forYou}
+        getPref={() => user.pref}
+        getFilter={() => user.filter}
+        onfilters={openFilters}
+        active={tab === 'foryou' && !paperId && !searching}
+        onopen={openPaper}
+      />
+      {#if filterActive(user.filter)}
+        <button class="filter-pill" onclick={openFilters} title="Edit feed filters">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z" /></svg>
+          <span><span class="sr-only">Feed filtered: </span>{filterSummary(user.filter)}</span>
+        </button>
+      {/if}
       <button class="search-fab" onclick={openSearch} aria-label="Search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       </button>
@@ -427,6 +448,45 @@
   .search-fab svg {
     width: 24px;
     height: 24px;
+  }
+  /* For You is filtered: say so, and how (tap to edit). */
+  .filter-pill {
+    position: absolute;
+    z-index: 5;
+    top: calc(12px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 120px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 6px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.55);
+    backdrop-filter: blur(8px);
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .filter-pill:hover {
+    background: rgb(0 0 0 / 0.75);
+  }
+  .filter-pill > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .filter-pill svg {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linejoin: round;
   }
 
   @media (max-width: 1000px) {

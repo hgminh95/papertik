@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte'
   import PaperCard from './PaperCard.svelte'
   import { fetchFeed } from './api'
-  import { user, markSeen, type Paper } from './user.svelte'
+  import { user, markSeen, filterActive, type FeedFilter, type Paper } from './user.svelte'
   import { likePaper, toggleLikePaper, bookmarkPaper } from './actions'
 
   let {
@@ -13,6 +13,8 @@
     exclude = [],
     lead = null,
     endNote = '',
+    getFilter = () => null,
+    onfilters,
     onopen,
   }: {
     /** The vector the feed is seeded with (base64 f32), or null for a random feed. */
@@ -29,6 +31,10 @@
     lead?: Paper | null
     /** Shown when a 'top' feed has nothing more to show. */
     endNote?: string
+    /** Which papers may be shown (For You's feed filters); null = any. */
+    getFilter?: () => FeedFilter | null
+    /** Open the filter settings (offered when the filter leaves nothing to show). */
+    onfilters?: () => void
     /** Open a paper (and its similar papers) in the app. */
     onopen?: (id: string) => void
   } = $props()
@@ -45,6 +51,9 @@
   // Bumped whenever the seed changes so an in-flight batch picked with the old one is dropped.
   let generation = 0
   let lastSeed: string | null | undefined // seed the queued cards were picked with
+  let lastFilter: string | undefined // and the filter
+  const filterKey = (f: FeedFilter | null) => (filterActive(f) ? JSON.stringify(f) : '')
+  const filtered = $derived(filterActive(getFilter()))
 
   const likedIds = $derived(new Set(user.liked.map((p) => p.id)))
   const savedIds = $derived(new Set(user.bookmarks.map((p) => p.id)))
@@ -63,10 +72,13 @@
       // Exclude what was seen and what is already queued.
       const seen = [...new Set([...user.seen, ...exclude, ...papers.map((p) => p.id)])]
       const seed = getPref()
-      const batch = await fetchFeed(seed, seen, { mode })
+      const filter = getFilter()
+      const batch = await fetchFeed(seed, seen, { mode, filter })
       lastSeed = seed
+      lastFilter = filterKey(filter)
       stale = gen !== generation
-      if (!stale && mode === 'top' && batch.length === 0) done = true
+      // Nothing left: a 'top' feed ran out, or the filter matches nothing (more).
+      if (!stale && batch.length === 0) done = true
       if (!stale) {
         const known = new Set(papers.map((p) => p.id))
         const first = papers.length
@@ -173,6 +185,11 @@
     if (active && lastSeed !== undefined && getPref() !== lastSeed) refresh()
   })
 
+  // The filter changed (in Personal): the queued cards may not match, so start over.
+  $effect(() => {
+    if (active && lastFilter !== undefined && filterKey(getFilter()) !== lastFilter) untrack(restart)
+  })
+
   onMount(loadMore)
 </script>
 
@@ -198,6 +215,9 @@
       {#if error}
         <p>{error}</p>
         <button class="pill" onclick={loadMore}>Try again</button>
+      {:else if done && filtered}
+        <p class="note">You've seen every paper that matches your feed filters.</p>
+        {#if onfilters}<button class="pill" onclick={onfilters}>Edit filters</button>{/if}
       {:else if done}
         <p class="note">{endNote || 'Nothing more like this yet.'}</p>
       {:else}
@@ -209,6 +229,11 @@
 {#if papers.length === 0 && !error && !done}
   <!-- Not a snap slot: cards inserted above a snapped slot would leave the reader on it. -->
   <div class="splash"><div class="spinner" aria-label="Loading"></div></div>
+{:else if papers.length === 0 && done && filtered}
+  <div class="splash status">
+    <p class="note">No papers match your feed filters. Loosen one to see papers here.</p>
+    {#if onfilters}<button class="pill" onclick={onfilters}>Edit filters</button>{/if}
+  </div>
 {/if}
 </div>
 

@@ -19,6 +19,9 @@ learns. Design notes are in [PLAN.md](PLAN.md).
   indexed, the ingest queue and backfill progress, vecdb load.
 - **Personal**: your taste vector as a heatmap, the papers closest to it, fields you liked,
   liked and recently seen papers, plus export / import / clear of everything stored in the browser.
+- **Feed filters** (on Personal): limit For You by publication year, citations, subject
+  (PaperTik fields and OpenAlex topics) and venue, with a live count of matching papers. Stored
+  in the browser like everything else; search and Discover are not filtered.
 
 ```
 web/      Svelte 5 SPA (feed UI, taste vector in localStorage)
@@ -87,6 +90,15 @@ on a GPU machine).
 5. On a like, the SPA sets `pref = (pref + paper) / 2` in localStorage and refetches.
 
 If vecdb is down the server keeps serving a random feed and reconnects when it comes back.
+
+**Feed filters** travel with the feed request. The index stores 16 bytes of attributes per
+paper (year, citations, field, topic, venue; strings as 32-bit hashes), and vecdb checks them
+before scoring a row, which costs far less than the dot product. With IVF it scans the nearest
+clusters first and keeps going (2x, 4x, ... more clusters) until it has 100 matches, so even a
+filter matching a few hundred papers fills the feed; at worst it checks every row's attributes.
+The server applies the same filter to random picks (cold start, exploration), from a cached list
+of matching rows when the filter is narrow. Measured at 4M synthetic papers, one query: 2-5 ms
+p50 for every filter from "none" to "matches 65 papers" (`vecdb bench --filters 48`).
 
 ## Performance and sizing
 

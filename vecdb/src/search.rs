@@ -1,6 +1,6 @@
-//! Exact top-k inner-product search over the int8 matrix.
+//! Top-k inner-product search over the int8 matrix: exact, IVF, and filtered.
 
-use crate::index::Index;
+use crate::index::{Attr, Index};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
@@ -146,12 +146,51 @@ pub struct Query<'a> {
     pub q: &'a [f32],
     pub k: usize,
     pub exclude: &'a HashSet<u32>,
+    pub filter: &'a Filter,
+}
+
+/// Which rows a feed may show (all conditions must hold). Zero / empty means "any".
+#[derive(Default, Debug, Clone)]
+pub struct Filter {
+    pub year_min: u16,
+    pub year_max: u16,
+    pub cited_min: u32,
+    /// Subject: rows in any of these categories (hash32) or OpenAlex topics.
+    pub fields: Vec<u32>,
+    pub topics: Vec<u16>,
+    pub venues: Vec<u32>, // hash32 of venue names
+}
+
+pub static NO_FILTER: Filter =
+    Filter { year_min: 0, year_max: 0, cited_min: 0, fields: Vec::new(), topics: Vec::new(), venues: Vec::new() };
+
+impl Filter {
+    pub fn is_empty(&self) -> bool {
+        self.year_min == 0
+            && self.year_max == 0
+            && self.cited_min == 0
+            && self.fields.is_empty()
+            && self.topics.is_empty()
+            && self.venues.is_empty()
+    }
+
+    #[inline]
+    pub fn matches(&self, a: &Attr) -> bool {
+        // A paper with no known year fails any year bound.
+        (self.year_min == 0 || a.year >= self.year_min)
+            && (self.year_max == 0 || (a.year != 0 && a.year <= self.year_max))
+            && a.cited >= self.cited_min
+            && (self.fields.is_empty() && self.topics.is_empty()
+                || self.fields.contains(&a.field)
+                || self.topics.contains(&a.topic))
+            && (self.venues.is_empty() || self.venues.contains(&a.venue))
+    }
 }
 
 /// Top-k rows by inner product with `q`, skipping rows in `exclude`. Sorted best first.
 #[allow(dead_code)]
 pub fn search(index: &Index, q: &[f32], k: usize, exclude: &HashSet<u32>) -> Vec<Hit> {
-    search_batch(index, &[Query { q, k, exclude }]).pop().unwrap()
+    search_batch(index, &[Query { q, k, exclude, filter: &NO_FILTER }]).pop().unwrap()
 }
 
 /// Answer several queries in one pass over the matrix. The scan is memory-bandwidth bound,
@@ -215,9 +254,101 @@ pub fn search_batch(index: &Index, queries: &[Query]) -> Vec<Vec<Hit>> {
         .collect()
 }
 
+/// Answer a batch: unfiltered queries share one scan (`search_batch_ivf`), filtered ones are
+/// searched one by one (`search_filtered`). Results are in query order.
+pub fn search_mixed(index: &Index, queries: &[Query], nprobe: usize) -> Vec<Vec<Hit>> {
+    let filtered = |q: &Query| index.attrs().is_some() && !q.filter.is_empty();
+    if !queries.iter().any(filtered) {
+        return search_batch_ivf(index, queries, nprobe);
+    }
+    let plain: Vec<usize> = (0..queries.len()).filter(|&i| !filtered(&queries[i])).collect();
+    let batch: Vec<Query> =
+        plain.iter().map(|&i| Query { q: queries[i].q, k: queries[i].k, exclude: queries[i].exclude, filter: &NO_FILTER }).collect();
+    let mut plain_hits = search_batch_ivf(index, &batch, nprobe).into_iter();
+    let mut out = Vec::with_capacity(queries.len());
+    for (i, q) in queries.iter().enumerate() {
+        if plain.binary_search(&i).is_ok() {
+            out.push(plain_hits.next().unwrap());
+        } else {
+            out.push(search_filtered(index, q, nprobe));
+        }
+    }
+    out
+}
+
+/// Top-k among the rows matching `query.filter`. Rows are checked against the filter before
+/// they are scored, which is far cheaper than the dot product. With IVF, clusters are scanned
+/// nearest first in growing waves (nprobe, then 2x, 4x, ...) until k matches are found, so a
+/// narrow filter (one venue, say) still fills the feed: at worst every row is checked.
+pub fn search_filtered(index: &Index, query: &Query, nprobe: usize) -> Vec<Hit> {
+    let Some(attrs) = index.attrs() else { return search_batch_ivf(index, std::slice::from_ref(query), nprobe).pop().unwrap() };
+    let (dim, k, filter) = (index.dim, query.k, query.filter);
+    if index.n == 0 || k == 0 {
+        return Vec::new();
+    }
+    let scales = index.scales();
+    let vecs = index.vecs();
+    let (q8, qs) = quantize(query.q);
+
+    // Row ranges in the order to scan them.
+    let clustered = index.nlist > 0 && nprobe > 0 && nprobe < index.nlist;
+    let ranges: Vec<(usize, usize)> = if clustered {
+        let lists = index.lists();
+        let mut scored: Vec<(f32, usize)> = index
+            .centroids()
+            .chunks_exact(dim)
+            .enumerate()
+            .map(|(j, c)| (c.iter().zip(query.q).map(|(a, b)| a * b).sum::<f32>(), j))
+            .collect();
+        scored.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
+        scored.iter().map(|&(_, j)| (lists[j] as usize, lists[j + 1] as usize)).collect()
+    } else {
+        (0..index.n).step_by(CHUNK_ROWS).map(|lo| (lo, (lo + CHUNK_ROWS).min(index.n))).collect()
+    };
+
+    let mut best: BinaryHeap<Hit> = BinaryHeap::with_capacity(k + 1);
+    let (mut start, mut wave) = (0, if clustered { nprobe } else { ranges.len() });
+    while start < ranges.len() {
+        let end = (start + wave).min(ranges.len());
+        let parts: Vec<BinaryHeap<Hit>> = ranges[start..end]
+            .par_iter()
+            .map(|&(lo, hi)| {
+                let mut heap = BinaryHeap::with_capacity(k + 1);
+                let mut threshold = f32::NEG_INFINITY;
+                for row in lo..hi {
+                    if !filter.matches(&attrs[row]) {
+                        continue;
+                    }
+                    let score = qs * scales[row] * dot_i8_i8(&q8, &vecs[row * dim..(row + 1) * dim]) as f32;
+                    if score <= threshold || query.exclude.contains(&(row as u32)) {
+                        continue;
+                    }
+                    push(&mut heap, k, Hit { row: row as u32, score });
+                    if heap.len() == k {
+                        threshold = heap.peek().unwrap().score;
+                    }
+                }
+                heap
+            })
+            .collect();
+        for h in parts.into_iter().flatten() {
+            push(&mut best, k, h);
+        }
+        start = end;
+        if best.len() >= k {
+            break;
+        }
+        wave *= 2;
+    }
+    let mut hits = best.into_vec();
+    hits.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.row.cmp(&b.row)));
+    hits
+}
+
 /// Approximate search with the IVF lists: score the query against the cluster centres, scan
 /// only the `nprobe` closest clusters. Queries in a batch that probe the same cluster share the
 /// scan of it. `nprobe == 0` (or an index without clusters) falls back to the exact scan.
+/// Filters are ignored here; see `search_mixed`.
 pub fn search_batch_ivf(index: &Index, queries: &[Query], nprobe: usize) -> Vec<Vec<Hit>> {
     let nlist = index.nlist;
     if nlist == 0 || nprobe == 0 || nprobe >= nlist {
@@ -326,7 +457,7 @@ mod tests {
         let batch: Vec<Query> = qs
             .iter()
             .enumerate()
-            .map(|(i, q)| Query { q, k: 10 + i, exclude: if i % 2 == 0 { &ex } else { &none } })
+            .map(|(i, q)| Query { q, k: 10 + i, exclude: if i % 2 == 0 { &ex } else { &none }, filter: &NO_FILTER })
             .collect();
         let got = search_batch(&index, &batch);
         for (i, q) in batch.iter().enumerate() {
@@ -391,7 +522,7 @@ mod tests {
         for _ in 0..20 {
             let r = (rng.next_u64() % 20_000) as usize;
             let q: Vec<f32> = index.vecs()[r * 64..(r + 1) * 64].iter().map(|&x| x as f32).collect();
-            let query = Query { q: &q, k: 20, exclude: &none };
+            let query = Query { q: &q, k: 20, exclude: &none, filter: &NO_FILTER };
             let exact = search_batch(&index, std::slice::from_ref(&query)).pop().unwrap();
             let approx = search_batch_ivf(&index, std::slice::from_ref(&query), 16).pop().unwrap();
             // The query's own row must come first, and all probes agree when nprobe = nlist.
@@ -404,6 +535,55 @@ mod tests {
         }
         let recall = found as f64 / total as f64;
         assert!(recall > 0.8, "recall {recall}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn filtered_matches_brute_force() {
+        let dir = std::env::temp_dir().join(format!("vecdb-filter-{}", std::process::id()));
+        crate::synth::generate(20_000, 64, 10, &dir, 4).unwrap();
+        let out = dir.join("index.bin");
+        crate::index::build(&dir.join("papers.jsonl"), &dir.join("embeddings.f32"), 64, Some(64), &out).unwrap();
+        let index = Index::open(&out).unwrap();
+        let attrs = index.attrs().expect("v3 index has attrs");
+        let h = crate::index::hash32;
+        let filters = [
+            Filter { year_min: 2010, year_max: 2015, ..Default::default() },
+            Filter { cited_min: 400, ..Default::default() },
+            Filter { venues: vec![h("PLDI")], ..Default::default() },
+            Filter { fields: vec![h("Operating Systems")], topics: vec![10_003], year_min: 2020, ..Default::default() },
+            Filter { venues: vec![h("no such venue")], ..Default::default() },
+        ];
+        let none = HashSet::new();
+        let mut rng = crate::synth::Rng::new(1);
+        for f in &filters {
+            let want_n = attrs.iter().filter(|a| f.matches(a)).count();
+            assert!(f.venues != vec![h("no such venue")] || want_n == 0);
+            let q: Vec<f32> = (0..64).map(|_| rng.gauss()).collect();
+            let query = Query { q: &q, k: 50, exclude: &none, filter: f };
+            for nprobe in [0, 4, 64] {
+                let got = search_mixed(&index, std::slice::from_ref(&query), nprobe).pop().unwrap();
+                assert_eq!(got.len(), want_n.min(50), "{f:?} nprobe {nprobe}");
+                assert!(got.iter().all(|h| f.matches(&attrs[h.row as usize])));
+            }
+            // Exact (nprobe 0) equals brute force over the matching rows.
+            let got = search_mixed(&index, std::slice::from_ref(&query), 0).pop().unwrap();
+            let (q8, qs) = quantize(&q);
+            let mut all: Vec<(u32, f32)> = (0..index.n)
+                .filter(|&r| f.matches(&attrs[r]))
+                .map(|r| (r as u32, qs * index.scales()[r] * dot_i8_i8(&q8, &index.vecs()[r * 64..(r + 1) * 64]) as f32))
+                .collect();
+            all.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+            assert_eq!(got.iter().map(|h| h.row).collect::<Vec<_>>(), all.iter().take(50).map(|x| x.0).collect::<Vec<_>>());
+        }
+        // Mixed batch: an unfiltered query next to a filtered one keeps its unfiltered answer.
+        let q: Vec<f32> = (0..64).map(|_| rng.gauss()).collect();
+        let plain = Query { q: &q, k: 10, exclude: &none, filter: &NO_FILTER };
+        let narrow = Query { q: &q, k: 10, exclude: &none, filter: &filters[2] };
+        let both = search_mixed(&index, &[plain, narrow], 8);
+        let alone = search_batch_ivf(&index, &[Query { q: &q, k: 10, exclude: &none, filter: &NO_FILTER }], 8).pop().unwrap();
+        assert_eq!(both[0].iter().map(|h| h.row).collect::<Vec<_>>(), alone.iter().map(|h| h.row).collect::<Vec<_>>());
+        assert!(both[1].iter().all(|h| filters[2].matches(&attrs[h.row as usize])));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

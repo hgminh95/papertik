@@ -255,6 +255,10 @@ sudo rsync -a --delete ingest/ /opt/papertok/ingest/
 sudo systemctl restart papertok-vecdb papertok-server papertok-ingest
 ```
 Static files are hashed, so a new frontend is live immediately; old tabs keep working.
+vecdb and the server share a memory layout, so restart both together after an update (the
+command above does). When an update changes the index format (e.g. the one adding feed
+filters), `papertok-ingest` rebuilds `index.bin` once when it starts; until then the site keeps
+working on the old index (feed filters say they apply after the next rebuild).
 
 **Updating the index** happens by itself: `papertok-ingest` rebuilds it when there are enough new
 papers (or every 6 hours if anything is new) and renames the new file over `index.bin`. vecdb

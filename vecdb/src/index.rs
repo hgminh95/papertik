@@ -1,16 +1,18 @@
-//! On-disk index format (`index.bin`), version 2.
+//! On-disk index format (`index.bin`), version 3 (version 2 is the same without `attrs`).
 //!
 //! ```text
 //! header (128 B, little endian)
-//!    0 magic "PTKIDX01"      8 version u32 (=2)   12 dim u32        16 n u64
+//!    0 magic "PTKIDX01"      8 version u32 (=3)   12 dim u32        16 n u64
 //!   24 off_ids u64          32 off_meta u64       40 off_scales u64  48 off_vecs u64
 //!   56 nlist u32 (0 = flat) 64 off_centroids u64  72 off_lists u64   80 build_id u64
+//!   88 off_attrs u64
 //! ids        u64[n]            numeric OpenAlex id (W123 -> 123)
 //! meta       u64[2n]           (start, end) byte range of the row's line in papers.jsonl
 //! scales     f32[n]            row i ≈ scales[i] * vecs[i]
 //! centroids  f32[nlist*dim]    IVF cluster centres (unit length)
 //! lists      u64[nlist+1]      rows of cluster j are [lists[j], lists[j+1])
 //! vecs       i8[n*dim]
+//! attrs      Attr[n]           what feed filters match on (16 B per row, see `Attr`)
 //! ```
 //! Rows are stored grouped by cluster, so each cluster is one contiguous run of memory; row
 //! numbers are internal (the Go server maps OpenAlex ids to rows through `ids`).
@@ -25,7 +27,7 @@ use std::path::Path;
 use crate::search::{dot_i8_i8, quantize};
 
 pub const MAGIC: &[u8; 8] = b"PTKIDX01";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 pub const HEADER_SIZE: usize = 128;
 const ALIGN: u64 = 64;
 
@@ -40,7 +42,33 @@ struct Layout {
     off_centroids: u64,
     off_lists: u64,
     off_vecs: u64,
+    off_attrs: u64,
     total: u64,
+}
+
+/// A row's attributes for feed filters. Strings are stored as `hash32` of the exact text.
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Attr {
+    pub cited: u32,
+    pub field: u32, // hash32 of the PaperTik category
+    pub venue: u32, // hash32 of the venue name
+    pub topic: u16, // OpenAlex topic number (T10036 -> 10036), 0 = none
+    pub year: u16,  // 0 = unknown
+}
+
+/// FNV-1a, 32 bit. 0 means "none", so a string that hashes to 0 is stored as 1. Mirrored in
+/// server/internal/store (Hash).
+pub fn hash32(s: &str) -> u32 {
+    if s.is_empty() {
+        return 0;
+    }
+    let mut h: u32 = 0x811c_9dc5;
+    for &b in s.as_bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h.max(1)
 }
 
 fn layout(n: u64, dim: u64, nlist: u64) -> Layout {
@@ -50,8 +78,9 @@ fn layout(n: u64, dim: u64, nlist: u64) -> Layout {
     let off_centroids = align_up(off_scales + 4 * n);
     let off_lists = align_up(off_centroids + 4 * nlist * dim);
     let off_vecs = align_up(off_lists + 8 * (nlist + 1));
-    let total = off_vecs + n * dim;
-    Layout { off_ids, off_meta, off_scales, off_centroids, off_lists, off_vecs, total }
+    let off_attrs = align_up(off_vecs + n * dim);
+    let total = off_attrs + n * std::mem::size_of::<Attr>() as u64;
+    Layout { off_ids, off_meta, off_scales, off_centroids, off_lists, off_vecs, off_attrs, total }
 }
 
 /// Read-only, memory-mapped index.
@@ -61,6 +90,7 @@ pub struct Index {
     pub n: usize,
     pub nlist: usize,
     pub build_id: u64,
+    has_attrs: bool, // version 3
     l: Layout,
 }
 
@@ -73,13 +103,20 @@ impl Index {
         }
         let u32_at = |o: usize| u32::from_le_bytes(mmap[o..o + 4].try_into().unwrap());
         let u64_at = |o: usize| u64::from_le_bytes(mmap[o..o + 8].try_into().unwrap());
-        if u32_at(8) != VERSION {
-            bail!("index version {} (need {}): rebuild it with `vecdb build`", u32_at(8), VERSION);
+        let version = u32_at(8);
+        if version != VERSION && version != 2 {
+            bail!("index version {} (need {}): rebuild it with `vecdb build`", version, VERSION);
         }
         let dim = u32_at(12) as usize;
         let n = u64_at(16) as usize;
         let nlist = u32_at(56) as usize;
-        let l = layout(n as u64, dim as u64, nlist as u64);
+        let mut l = layout(n as u64, dim as u64, nlist as u64);
+        let has_attrs = version >= 3;
+        if !has_attrs {
+            l.total = l.off_vecs + (n * dim) as u64; // no feed filters until the next build
+        } else if u64_at(88) != l.off_attrs {
+            bail!("index header offsets do not match layout");
+        }
         if u64_at(24) != l.off_ids || u64_at(32) != l.off_meta || u64_at(40) != l.off_scales || u64_at(48) != l.off_vecs
             || u64_at(64) != l.off_centroids || u64_at(72) != l.off_lists
         {
@@ -90,7 +127,7 @@ impl Index {
         }
         #[cfg(unix)]
         let _ = mmap.advise(memmap2::Advice::WillNeed);
-        Ok(Index { build_id: u64_at(80), dim, n, nlist, l, mmap })
+        Ok(Index { build_id: u64_at(80), dim, n, nlist, has_attrs, l, mmap })
     }
 
     fn section<T>(&self, off: u64, len: usize) -> &[T] {
@@ -108,6 +145,10 @@ impl Index {
     }
     pub fn centroids(&self) -> &[f32] {
         self.section(self.l.off_centroids, self.nlist * self.dim)
+    }
+    /// Per-row filter attributes; None for a version 2 index.
+    pub fn attrs(&self) -> Option<&[Attr]> {
+        self.has_attrs.then(|| self.section(self.l.off_attrs, self.n))
     }
     /// Row range of each cluster: rows of cluster j are lists[j]..lists[j+1].
     pub fn lists(&self) -> &[u64] {
@@ -149,6 +190,7 @@ pub struct Builder {
     dim: usize,
     ids: Vec<u64>,
     meta: Vec<[u64; 2]>,
+    attrs: Vec<Attr>,
     scales: Vec<f32>,
     vecs: Vec<i8>,
 }
@@ -159,13 +201,14 @@ impl Builder {
             dim,
             ids: Vec::with_capacity(capacity),
             meta: Vec::with_capacity(capacity),
+            attrs: Vec::with_capacity(capacity),
             scales: Vec::with_capacity(capacity),
             vecs: Vec::with_capacity(capacity * dim),
         }
     }
 
     /// Normalise `v` and store it as int8 with a per-row scale.
-    pub fn push(&mut self, id: u64, meta: [u64; 2], v: &mut [f32]) {
+    pub fn push(&mut self, id: u64, meta: [u64; 2], attr: Attr, v: &mut [f32]) {
         let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
             v.iter_mut().for_each(|x| *x /= norm);
@@ -173,14 +216,16 @@ impl Builder {
         let (q, scale) = quantize(v);
         self.ids.push(id);
         self.meta.push(meta);
+        self.attrs.push(attr);
         self.scales.push(scale);
         self.vecs.extend_from_slice(&q);
     }
 
     /// Store an already normalised + quantised row.
-    pub fn push_quantized(&mut self, id: u64, meta: [u64; 2], q: &[i8], scale: f32) {
+    pub fn push_quantized(&mut self, id: u64, meta: [u64; 2], attr: Attr, q: &[i8], scale: f32) {
         self.ids.push(id);
         self.meta.push(meta);
+        self.attrs.push(attr);
         self.scales.push(scale);
         self.vecs.extend_from_slice(q);
     }
@@ -252,6 +297,7 @@ impl Builder {
         header[64..72].copy_from_slice(&l.off_centroids.to_le_bytes());
         header[72..80].copy_from_slice(&l.off_lists.to_le_bytes());
         header[80..88].copy_from_slice(&build_id.to_le_bytes());
+        header[88..96].copy_from_slice(&l.off_attrs.to_le_bytes());
         w.write_all(&header)?;
 
         let mut written = HEADER_SIZE as u64;
@@ -272,6 +318,8 @@ impl Builder {
         for &r in &order {
             w.write_all(as_bytes(self.row(r as usize)))?;
         }
+        w.write_all(&vec![0u8; (l.off_attrs - l.off_vecs - (n * dim) as u64) as usize])?;
+        w.write_all(&perm(&|r| as_bytes(std::slice::from_ref(&self.attrs[r])).to_vec()))?;
         w.flush()?;
         eprintln!(
             "built {}: {} papers, dim {}, {} lists, {:.1} MB",
@@ -360,6 +408,16 @@ fn nearest(cq: &[(Vec<i8>, f32)], row: &[i8]) -> u32 {
     best.1
 }
 
+pub fn attr_of(year: i64, cited_by: i64, field: &str, venue: &str, topic_id: &str) -> Attr {
+    Attr {
+        cited: cited_by.clamp(0, u32::MAX as i64) as u32,
+        field: hash32(field),
+        venue: hash32(venue),
+        topic: topic_id.trim_start_matches('T').parse::<u16>().unwrap_or(0),
+        year: year.clamp(0, u16::MAX as i64) as u16,
+    }
+}
+
 /// Build `index.bin` from `papers.jsonl` + raw f32 embeddings (row i <-> line i).
 pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>, out: &Path) -> Result<()> {
     let emb_file = File::open(embeddings).with_context(|| format!("open {}", embeddings.display()))?;
@@ -388,6 +446,16 @@ pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>,
             id: String,
             #[serde(default)]
             excluded: bool,
+            #[serde(default)]
+            year: i64,
+            #[serde(default)]
+            cited_by: i64,
+            #[serde(default)]
+            field: String,
+            #[serde(default)]
+            venue: String,
+            #[serde(default)]
+            topic_id: String,
         }
         let r: Row = serde_json::from_str(&line).with_context(|| format!("papers.jsonl line {}", rows + 1))?;
         let i = rows;
@@ -402,7 +470,7 @@ pub fn build(papers: &Path, embeddings: &Path, dim: usize, nlist: Option<usize>,
         for (j, c) in emb[i * row_bytes..(i + 1) * row_bytes].chunks_exact(4).enumerate() {
             row[j] = f32::from_le_bytes(c.try_into().unwrap());
         }
-        b.push(id, [start, pos], &mut row);
+        b.push(id, [start, pos], attr_of(r.year, r.cited_by, &r.field, &r.venue, &r.topic_id), &mut row);
     }
     if rows < n_emb {
         bail!("papers.jsonl has {} lines but embeddings has {} rows", rows, n_emb);

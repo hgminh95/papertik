@@ -161,6 +161,8 @@ func (s *Server) Handler() http.Handler {
 	api.Handle("GET /api/paper/{id}", s.requireSession(http.HandlerFunc(s.handlePaper)))
 	api.Handle("POST /api/pending", s.requireSession(http.HandlerFunc(s.handlePending)))
 	api.Handle("POST /api/vectors", s.requireSession(http.HandlerFunc(s.handleVectors)))
+	api.Handle("GET /api/filters/options", s.requireSession(http.HandlerFunc(s.handleFilterOptions)))
+	api.Handle("POST /api/filters/count", s.requireSession(http.HandlerFunc(s.handleFilterCount)))
 	api.HandleFunc("GET /api/healthz", s.handleHealth)
 	api.HandleFunc("GET /api/status", s.handleStatus)
 	limited := newLimiter(5, 20).wrap(api)
@@ -228,6 +230,8 @@ type feedRequest struct {
 	Seen []string `json:"seen"` // OpenAlex ids, oldest first
 	K    int      `json:"k"`
 	Mode string   `json:"mode"` // "" = feed (sampled + exploration), "top" = exact nearest neighbours
+	// Feed only ("top" ignores it): which papers may be shown. See filters.go.
+	Filter *filterRequest `json:"filter"`
 }
 
 type feedPaper struct {
@@ -272,7 +276,7 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		}
 		items = s.rec.Top(ctx, st, pref, seen, k)
 	} else {
-		items = s.rec.Next(ctx, st, pref, seen, k)
+		items = s.rec.Next(ctx, st, pref, seen, k, req.Filter.toFilter())
 	}
 
 	rows := make([]rowOut, len(items))

@@ -41,6 +41,7 @@ from searchindex import SearchIndex  # noqa: E402
 
 FILTER = "primary_topic.field.id:17,has_abstract:true,is_retracted:false,language:en"
 BATCH = 100  # works per lookup request: OpenAlex's maximum for an openalex_id filter
+INDEX_VERSION = 3  # index.bin format written by vecdb (vecdb/src/index.rs); older ones are rebuilt
 DAY = 86400
 
 
@@ -346,6 +347,20 @@ class Ingest:
         os.replace(self.index.with_suffix(".tmp.bin"), self.index)  # atomic: vecdb and the server switch on their own
         self.sync_search()
 
+    def upgrade_index(self):
+        """Rebuild an index written in an older format by the current vecdb (version 3 added
+        the attributes feed filters match on). Runs once, at startup."""
+        if not self.index.exists() or self.state["indexed_rows"] == 0:
+            return
+        with open(self.index, "rb") as f:
+            version = int.from_bytes(f.read(12)[8:12], "little")
+        if version >= INDEX_VERSION:
+            return
+        log(f"index is format v{version}; rebuilding as v{INDEX_VERSION} (feed filters need it)")
+        self.build(self.papers)
+        os.replace(self.index.with_suffix(".tmp.bin"), self.index)
+        self.sync_search()
+
     def sync_search(self):
         """Make the papers in the last build searchable (search.db)."""
         upto = self.state["indexed_rows"]
@@ -482,6 +497,10 @@ class Ingest:
             self.sync_search()
         except Exception as ex:
             self.error("search index", ex)
+        try:
+            self.upgrade_index()
+        except Exception as ex:
+            self.error("index upgrade", ex)
         while not self.stop and self.state.get("taxonomy_version") != taxonomy.VERSION:
             try:
                 self.relabel()

@@ -32,6 +32,44 @@ export interface HistoryEntry {
   ts: number // ms since epoch, first time it was seen
 }
 
+/** Which papers For You may show (search and Discover are not filtered). 0 / empty = any. */
+export interface FeedFilter {
+  yearMin: number
+  yearMax: number
+  citedMin: number
+  fields: string[] // PaperTik categories
+  topics: { id: string; name: string }[] // OpenAlex topics; a paper matches a field OR a topic
+  venues: string[]
+}
+
+/** Most values per list (the server's limit per request). */
+export const MAX_FILTER_VALUES = 32
+
+export const emptyFilter = (): FeedFilter => ({ yearMin: 0, yearMax: 0, citedMin: 0, fields: [], topics: [], venues: [] })
+
+export const filterActive = (f: FeedFilter | null | undefined): f is FeedFilter =>
+  !!f && !!(f.yearMin || f.yearMax || f.citedMin || f.fields.length || f.topics.length || f.venues.length)
+
+/** Keep only well-formed values (from storage or an imported file). */
+function cleanFilter(x: unknown): FeedFilter {
+  const f = emptyFilter()
+  if (!x || typeof x !== 'object') return f
+  const o = x as Record<string, unknown>
+  const int = (v: unknown, hi: number) => (Number.isFinite(v) ? Math.min(Math.max(Math.round(Number(v)), 0), hi) : 0)
+  const strings = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((s) => typeof s === 'string' && s))] : []).slice(0, MAX_FILTER_VALUES)
+  f.yearMin = int(o.yearMin, 9999)
+  f.yearMax = int(o.yearMax, 9999)
+  f.citedMin = int(o.citedMin, 1e9)
+  f.fields = strings(o.fields)
+  f.venues = strings(o.venues)
+  if (Array.isArray(o.topics))
+    f.topics = o.topics
+      .filter((t) => t && typeof t.id === 'string' && typeof t.name === 'string')
+      .map((t) => ({ id: t.id, name: t.name }))
+      .slice(0, MAX_FILTER_VALUES)
+  return f
+}
+
 /** A like that contributes to the taste vector: the paper's quantised vector. */
 interface LikeVec {
   id: string
@@ -52,6 +90,7 @@ interface State {
   pendingLikes: string[] // liked while not indexed; applied to `pref` once they are
   bookmarks: SavedPaper[] // newest first; saved for later, does not affect the taste vector
   history: HistoryEntry[] // newest first
+  filter: FeedFilter // For You only
 }
 
 const KEY = 'papertok:v1'
@@ -74,6 +113,7 @@ const empty = (): State => ({
   pendingLikes: [],
   bookmarks: [],
   history: [],
+  filter: emptyFilter(),
 })
 
 function toSaved(p: Paper): SavedPaper {
@@ -86,6 +126,7 @@ function load(): State {
     const raw = localStorage.getItem(KEY)
     if (raw) {
       const state: State = { ...empty(), ...JSON.parse(raw) }
+      state.filter = cleanFilter(state.filter)
       // Saved before likes were kept individually: the old vector becomes the base.
       if (state.pref && !state.basePref && state.likeVecs.length === 0) {
         state.basePref = state.pref
@@ -289,6 +330,17 @@ export function clearHistory() {
   save()
 }
 
+/** Change the feed filter (For You picks it up the next time it is shown). */
+export function setFilter(patch: Partial<FeedFilter>) {
+  Object.assign(user.filter, patch)
+  save()
+}
+
+export function clearFilter() {
+  user.filter = emptyFilter()
+  save()
+}
+
 export function reset() {
   Object.assign(user, empty())
   save()
@@ -351,6 +403,7 @@ export function importData(text: string, dim: number) {
     next.bookmarks = data.bookmarks.filter((p) => p && typeof p.id === 'string').slice(0, MAX_BOOKMARKS)
   if (Array.isArray(data.history))
     next.history = data.history.filter((h) => h && typeof h.id === 'string').slice(0, MAX_HISTORY)
+  next.filter = cleanFilter(data.filter)
   Object.assign(user, next)
   recompute()
   save()

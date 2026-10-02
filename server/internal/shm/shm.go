@@ -14,13 +14,18 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"papertok/server/internal/store"
 )
 
 const (
 	magic          = uint64(0x31304d48534b5450) // "PTKSHM01" little endian
-	version        = 1
+	version        = 2
 	headerSize     = 128
 	slotHeaderSize = 64
+
+	// MaxFilterValues is the most values per filter list (categories, topics, venues).
+	MaxFilterValues = 32
 
 	stateFree      = 0
 	stateClaimed   = 1
@@ -177,9 +182,10 @@ func (c *Client) Alive() bool {
 }
 
 // Search asks vecdb for the top-k rows by inner product with q, skipping rows in exclude.
+// f (nil = none) limits the rows to those matching a feed filter.
 // buildID is the index build the caller's row numbers refer to; if vecdb is serving another
 // build (one of the two has reloaded a new index and the other not yet), it answers ErrStale.
-func (c *Client) Search(ctx context.Context, buildID uint64, q []float32, k int, exclude []uint32) ([]Hit, error) {
+func (c *Client) Search(ctx context.Context, buildID uint64, q []float32, k int, exclude []uint32, f *store.Filter) ([]Hit, error) {
 	r, err := c.get()
 	if err != nil {
 		return nil, err
@@ -208,6 +214,7 @@ func (c *Client) Search(ctx context.Context, buildID uint64, q []float32, k int,
 	if len(exclude) > 0 {
 		copy(unsafe.Slice((*uint32)(unsafe.Pointer(&r.mem[offExclude])), len(exclude)), exclude)
 	}
+	r.putFilter(base, offExclude+4*r.maxExclude+8*r.maxK, f)
 	atomic.StoreUint32(state, stateReady) // publishes the payload
 
 	if err := r.wait(ctx, state); err != nil {
@@ -241,6 +248,28 @@ func (c *Client) Search(ctx context.Context, buildID uint64, q []float32, k int,
 		return nil, ErrBadRequest
 	}
 	return hits, nil
+}
+
+// putFilter writes the request's filter (all zero = none); see vecdb/src/shm.rs.
+func (r *region) putFilter(base, offValues int, f *store.Filter) {
+	le := binary.LittleEndian
+	if f == nil {
+		f = &store.Filter{}
+	}
+	lists := [3][]uint32{f.Fields, make([]uint32, len(f.Topics)), f.Venues}
+	for i, t := range f.Topics {
+		lists[1][i] = uint32(t)
+	}
+	for i, list := range lists {
+		list = list[:min(len(list), MaxFilterValues)]
+		le.PutUint32(r.mem[base+32+4*i:], uint32(len(list)))
+		for j, v := range list {
+			le.PutUint32(r.mem[offValues+4*(i*MaxFilterValues+j):], v)
+		}
+	}
+	le.PutUint32(r.mem[base+44:], f.CitedMin)
+	le.PutUint32(r.mem[base+48:], uint32(f.YearMin))
+	le.PutUint32(r.mem[base+52:], uint32(f.YearMax))
 }
 
 // claim finds a FREE slot and moves it to CLAIMED, returning its offset.
